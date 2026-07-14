@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: targeting-db-init-job
+  namespace: toggle-master
+spec:
+  template:
+    spec:
+      containers:
+      - name: postgres-init
+        image: postgres:15-alpine
+        command:
+        - "sh"
+        - "-c"
+        - |
+          psql "postgres://postgres:Gio123vani-targeting@172.31.19.22:5432/postgres" -c "
+          DROP TABLE IF EXISTS targeting_rules CASCADE;
+          CREATE TABLE targeting_rules (
+              id SERIAL PRIMARY KEY,
+              flag_name VARCHAR(100) UNIQUE NOT NULL,
+              is_enabled BOOLEAN NOT NULL DEFAULT true,
+              rules JSONB NOT NULL,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );"
+      restartPolicy: Never
+  backoffLimit: 4

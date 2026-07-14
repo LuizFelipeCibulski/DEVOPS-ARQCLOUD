@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flag-config
+  namespace: toggle-master
+data:
+  DB_USER: "postgres"
+  DB_PORT: "5432"
+  DB_NAME: "postgres"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: flag-secret
+  namespace: toggle-master
+type: Opaque
+data:
+  # Cole aqui o código em Base64 gerado no Passo 1
+  DATABASE_URL: "cG9zdGdyZXM6Ly9wb3N0Z3JlczpHaW8xMjN2YW5pLWZsYWdAMTcyLjMxLjkuMTI6NTQzMi9wb3N0Z3Jlcw=="
+  AUTH_SERVICE_URL: "aHR0cDovL2F1dGgtc2VydmljZTo4MDAx"

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: targeting-service
+  namespace: toggle-master
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: targeting-service
+  template:
+    metadata:
+      labels:
+        app: targeting-service
+    spec:
+      containers:
+      - name: targeting-service
+        # Substitua com a URL exata do seu repositório ECR da Etapa 2
+        image: 121590089702.dkr.ecr.us-east-1.amazonaws.com/namespace/targeting-service:latest
+        ports:
+        - containerPort: 8003 # Ajuste para a porta que seu microsserviço Go ouve
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        # Injeção das variáveis de ambiente a partir do ConfigMap e Secret
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: targeting-secret
+              key: DATABASE_URL
+        - name: AUTH_SERVICE_URL
+          valueFrom:
+            secretKeyRef:
+              name: targeting-secret
+              key: AUTH_SERVICE_URL
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: targeting-config
+              key: DB_USER
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: targeting-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: targeting-config
+              key: DB_NAME
+
+        # Requisito de boas práticas do desafio (Requests e Limits)
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: targeting-service
+  namespace: toggle-master
+spec:
+  type: ClusterIP # Exigido no PDF do desafio
+  ports:
+  - port: 8003
+    targetPort: 8003
+  selector:
+    app: targeting-service

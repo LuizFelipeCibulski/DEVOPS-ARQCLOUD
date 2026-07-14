@@ -1,0 +1,28 @@
+# Adicionar o repositório oficial do KEDA
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+
+# Criar namespace dedicado
+kubectl create namespace keda
+
+# Instalar o KEDA
+helm install keda kedacore/keda --namespace keda
+
+aws iam create-policy \
+  --policy-name KedaSQSPolicy \
+  --policy-document file://keda-sqs-policy.json
+
+
+eksctl create iamserviceaccount \
+  --name keda-operator \
+  --namespace keda \
+  --cluster togglemaster-prod \
+  --attach-policy-arn arn:aws:iam::628409561285:policy/KedaSQSPolicy \
+  --approve \
+  --override-existing-serviceaccounts
+
+
+kubectl annotate serviceaccount keda-operator \
+  -n keda \
+  eks.amazonaws.com/role-arn=arn:aws:iam::628409561285:role/KedaSQSPolicy \
+  --overwrite

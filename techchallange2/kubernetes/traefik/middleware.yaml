@@ -1,0 +1,50 @@
+# Middleware para remover o prefixo
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-auth-prefix
+  namespace: auth-service
+spec:
+  stripPrefix:
+    prefixes:
+      - /auth
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-flags-prefix
+  namespace: flag-service
+spec:
+  stripPrefix:
+    prefixes:
+      - /flags
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-analytics-prefix
+  namespace: analytics-service
+spec:
+  stripPrefix:
+    prefixes:
+      - /analytics
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-evaluation-prefix
+  namespace: evaluation-service
+spec:
+  stripPrefix:
+    prefixes:
+      - /evaluation
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-target-prefix
+  namespace: targeting-service
+spec:
+  stripPrefix:
+    prefixes:
+      - /target

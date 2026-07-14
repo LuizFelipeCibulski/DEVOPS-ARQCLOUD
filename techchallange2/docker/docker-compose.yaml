@@ -1,0 +1,157 @@
+services:
+  app:
+    build:
+      context: ./auth-service
+    ports: 
+      - "8001:8001" 
+    env_file:
+      - ./auth-service/.env
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    networks:
+      - rede-app
+  app-flag:
+    build:
+      context: ./flag-service
+    ports: 
+      - "8002:8002" 
+    env_file:
+      - ./flag-service/.env
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks:
+      - rede-app
+  app-targeting:
+    build:
+      context: ./targeting-service
+    ports: 
+      - "8003:8003" 
+    env_file:
+      - ./targeting-service/.env
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks:
+      - rede-app
+  app-analytics:
+    build:
+      context: ./analytics-service
+    ports: 
+      - "8005:8005" 
+    env_file:
+      - ./analytics-service/.env
+    depends_on:
+      app:
+        condition: service_started
+      app-flag:
+        condition: service_started
+      app-targeting:
+        condition: service_started
+      app-evaluation:
+        condition: service_started
+      dynamodb:
+        condition: service_started
+      ministack:
+        condition: service_started
+    networks:
+      - rede-app
+  app-evaluation:
+    build:
+      context: ./evaluation-service
+    ports: 
+      - "8004:8004" 
+    env_file:
+      - ./evaluation-service/.env
+    depends_on:
+      app:
+        condition: service_started
+      app-flag:
+        condition: service_started
+      app-targeting:
+        condition: service_started
+      redis-db:
+        condition: service_healthy
+      dynamodb:
+        condition: service_started
+      ministack:
+        condition: service_started
+
+    networks:
+      - rede-app             
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: auth_postgres_db
+    env_file:
+      - ./auth-service/.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./auth-service/db/init.sql:/docker-entrypoint-initdb.d/01-auth-init.sql
+      - ./flag-service/db/init.sql:/docker-entrypoint-initdb.d/02-flag-init.sql
+      - ./targeting-service/db/init.sql:/docker-entrypoint-initdb.d/03-targeting--init.sql
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Usamos as variáveis aqui também para o teste de saúde do banco
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rede-app
+  redis-db:
+    image: redis:8.8-alpine
+    container_name: redis_db
+    env_file:
+      - ./evaluation-service/.env
+    ports: 
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s      # Tempo entre as checagens
+      timeout: 5s        # Tempo limite para o comando responder
+      retries: 3         # Número de tentativas falhas antes de marcar como 'unhealthy'
+      start_period: 5s   # Tempo de carência para o Redis inicializar antes de começar a testar
+    networks:
+      - rede-app  
+  dynamodb:
+    image: amazon/dynamodb-local
+    container_name: dynamodb
+    user: root
+    ports:
+      - 8000:8000
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data"
+    volumes:
+      - dynamodb:/home/dynamodblocal/data
+    working_dir: /home/dynamodblocal
+    networks:
+      - rede-app
+  ministack:
+    image: ministackorg/ministack   # emulador estilo LocalStack, mas free
+    container_name: ministack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=dummy_access_key
+      - AWS_SECRET_ACCESS_KEY=dummy_secret_key
+    volumes:
+      - ministack:/var/lib/localstack
+    networks:
+      - rede-app
+volumes:
+  pgdata:
+  redis_data:
+  dynamodb:
+  ministack:
+networks:
+  rede-app:
+    driver: bridge
