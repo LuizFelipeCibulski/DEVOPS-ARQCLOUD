@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: targeting-cm
+  namespace: targeting-service
+data:
+  PORT: "8003"
+  AUTH_SERVICE_URL: "http://auth-service.auth-service.svc.cluster.local"

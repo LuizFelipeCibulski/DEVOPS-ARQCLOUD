@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: evaluation-service
+  name: evaluation-service
+  namespace: evaluation-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: evaluation-service
+  template:
+    metadata:
+      labels:
+        app: evaluation-service
+    spec:
+      containers:
+      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/evaluation-service:latest
+        name: evaluation-service
+        env:
+         - name: REDIS_URL
+           valueFrom:
+            secretKeyRef:
+              name: evaluation-secrets
+              key: REDIS_URL
+         - name: SERVICE_API_KEY
+           valueFrom:
+            secretKeyRef:
+              name: evaluation-secrets
+              key: SERVICE_API_KEY
+         - name: AWS_SQS_URL
+           valueFrom:
+            secretKeyRef:
+              name: evaluation-secrets
+              key: AWS_SQS_URL
+         - name: AWS_ACCESS_KEY_ID
+           valueFrom:
+            secretKeyRef:
+              name: evaluation-secrets
+              key: AWS_ACCESS_KEY_ID
+         - name: AWS_SECRET_ACCESS_KEY
+           valueFrom:
+            secretKeyRef:
+              name: evaluation-secrets
+              key: AWS_SECRET_ACCESS_KEY
+         - name: AWS_SESSION_TOKEN
+           valueFrom:
+            secretKeyRef:
+              name: evaluation-secrets
+              key: AWS_SESSION_TOKEN
+         - name: PORT
+           valueFrom:
+            configMapKeyRef:
+              name: evaluation-cm
+              key: PORT
+         - name: AWS_REGION
+           valueFrom:
+            configMapKeyRef:
+              name: evaluation-cm
+              key: AWS_REGION
+         - name: FLAG_SERVICE_URL
+           valueFrom:
+            configMapKeyRef:
+              name: evaluation-cm
+              key: FLAG_SERVICE_URL
+         - name: TARGETING_SERVICE_URL
+           valueFrom:
+            configMapKeyRef:
+              name: evaluation-cm
+              key: TARGETING_SERVICE_URL
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8004
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8004
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 3
+          failureThreshold: 3

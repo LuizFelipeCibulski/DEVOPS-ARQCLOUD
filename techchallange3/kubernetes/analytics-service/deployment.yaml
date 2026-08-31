@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: analytics-service
+  name: analytics-service
+  namespace: analytics-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics-service
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+    spec:
+      containers:
+      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/analytics-service:latest
+        name: analytics-service
+        env:
+         - name: PORT
+           valueFrom:
+            configMapKeyRef:
+              name: analytics-cm
+              key: PORT
+         - name: AWS_REGION
+           valueFrom:
+            configMapKeyRef:
+              name: analytics-cm
+              key: AWS_REGION
+         - name: AWS_SQS_URL
+           valueFrom:
+            secretKeyRef:
+              name: analytics-secrets
+              key: AWS_SQS_URL
+         - name: AWS_DYNAMODB_TABLE
+           valueFrom:
+            secretKeyRef:
+              name: analytics-secrets
+              key: AWS_DYNAMODB_TABLE
+         - name: AWS_ACCESS_KEY_ID
+           valueFrom:
+            secretKeyRef:
+              name: analytics-secrets
+              key: AWS_ACCESS_KEY_ID
+         - name: AWS_SECRET_ACCESS_KEY
+           valueFrom:
+            secretKeyRef:
+              name: analytics-secrets
+              key: AWS_SECRET_ACCESS_KEY
+         - name: AWS_SESSION_TOKEN
+           valueFrom:
+            secretKeyRef:
+              name: analytics-secrets
+              key: AWS_SESSION_TOKEN
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8005
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8005
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 3
+          failureThreshold: 3 # 3 falhas seguidas = reinicia

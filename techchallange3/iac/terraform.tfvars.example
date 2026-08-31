@@ -1,0 +1,34 @@
+# Copie para terraform.tfvars e ajuste. terraform.tfvars 
+
+project_name = "togglemaster"
+environment  = "dev"
+aws_region   = "us-east-1"
+
+# ------------------------------------------------------------------
+# Opcao A do desafio - AWS Academy
+# ------------------------------------------------------------------
+is_academy         = true
+lab_role_name      = "LabRole"
+manage_eks_cluster = true # false = so a VPC; voce cria o EKS pelo Console
+
+# ------------------------------------------------------------------
+# Opcao B do desafio - conta AWS normal (descomente e ajuste)
+# ------------------------------------------------------------------
+# is_academy         = false
+# manage_eks_cluster = true
+
+azs                      = ["us-east-1a", "us-east-1b"]
+vpc_cidr                 = "10.0.0.0/16"
+public_subnet_cidrs      = ["10.0.0.0/24", "10.0.1.0/24"]
+private_app_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+private_db_subnet_cidrs  = ["10.0.20.0/24", "10.0.21.0/24"]
+single_nat_gateway       = true
+
+node_instance_types = ["t3.medium"]
+node_min_size       = 1
+node_desired_size   = 2
+node_max_size       = 4
+
+redis_serverless    = true
+dynamodb_table_name = "ToggleMasterAnalytics"
+sqs_queue_name      = "evaluation"
