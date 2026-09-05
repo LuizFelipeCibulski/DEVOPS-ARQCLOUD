@@ -26,7 +26,7 @@ resource "aws_internet_gateway" "this" {
 # ---------------------------------------------------------------------
 # Subnets
 # ---------------------------------------------------------------------
-
+#trivy:ignore:AVD-AWS-0164
 resource "aws_subnet" "public" {
   count                   = length(var.azs)
   vpc_id                  = aws_vpc.this.id
