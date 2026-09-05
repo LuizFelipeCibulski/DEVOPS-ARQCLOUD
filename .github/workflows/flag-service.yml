@@ -5,16 +5,17 @@
 name: CI/CD - flag-service
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'techchallange3/docker/flag-service/**'
-      - '.github/workflows/flag-service.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'techchallange3/docker/flag-service/**'
-      - '.github/workflows/flag-service.yml'
+  workflow_dispatch:
+#  push:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange3/docker/flag-service/**'
+#      - '.github/workflows/flag-service.yml'
+#  pull_request:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange3/docker/flag-service/**'
+#      - '.github/workflows/flag-service.yml'
 
 concurrency:
   group: flag-service-${{ github.ref }}

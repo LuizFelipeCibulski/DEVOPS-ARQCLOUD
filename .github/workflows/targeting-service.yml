@@ -5,16 +5,17 @@
 name: CI/CD - targeting-service
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'techchallange3/docker/targeting-service/**'
-      - '.github/workflows/targeting-service.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'techchallange3/docker/targeting-service/**'
-      - '.github/workflows/targeting-service.yml'
+  workflow_dispatch:
+#  push:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange3/docker/targeting-service/**'
+#      - '.github/workflows/targeting-service.yml'
+#  pull_request:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange3/docker/targeting-service/**'
+#      - '.github/workflows/targeting-service.yml'
 
 concurrency:
   group: targeting-service-${{ github.ref }}

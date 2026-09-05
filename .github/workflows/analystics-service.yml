@@ -5,16 +5,18 @@
 name: CI/CD - analytics-service
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'techchallange3/docker/analytics-service/**'
-      - '.github/workflows/analytics-service.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'techchallange3/docker/analytics-service/**'
-      - '.github/workflows/analytics-service.yml'
+  workflow_dispatch:
+#  push:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange3/docker/analytics-service/**'
+#      - '.github/workflows/analytics-service.yml'
+#  pull_request:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange3/docker/analytics-service/**'
+#      - '.github/workflows/analytics-service.yml'
+
 
 concurrency:
   group: analytics-service-${{ github.ref }}

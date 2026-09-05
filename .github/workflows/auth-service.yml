@@ -5,16 +5,17 @@
 name: CI/CD - auth-service
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'techchallange2/docker/auth-service/**'
-      - '.github/workflows/auth-service.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'techchallange2/docker/auth-service/**'
-      - '.github/workflows/auth-service.yml'
+  workflow_dispatch:
+#  push:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange2/docker/auth-service/**'
+#      - '.github/workflows/auth-service.yml'
+#  pull_request:
+#    branches: [ main ]
+#    paths:
+#      - 'techchallange2/docker/auth-service/**'
+#      - '.github/workflows/auth-service.yml'
 
 # Evita rodar 2 pipelines do mesmo PR/branch ao mesmo tempo (economiza minutos de CI)
 concurrency:
