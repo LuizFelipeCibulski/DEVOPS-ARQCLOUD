@@ -96,7 +96,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: "Trivy config scan (Terraform misconfigurations)"
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           scan-type: 'config'
           scan-ref: ${{ env.TF_DIR }}
