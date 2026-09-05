@@ -76,6 +76,7 @@ variable "endpoint_private_access" {
 }
 
 variable "public_access_cidrs" {
+  type    = list(string)
   default = "191.5.186.85/32" 
 }
 
