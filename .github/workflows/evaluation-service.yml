@@ -1,0 +1,215 @@
+# =====================================================================================
+# CI/CD - evaluation-service (Go)
+# =====================================================================================
+
+name: CI/CD - evaluation-service
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'techchallange3/docker/evaluation-service/**'
+      - '.github/workflows/evaluation-service.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'techchallange3/docker/evaluation-service/**'
+      - '.github/workflows/evaluation-service.yml'
+
+# Evita rodar 2 pipelines do mesmo PR/branch ao mesmo tempo (economiza minutos de CI)
+concurrency:
+  group: evaluation-service-${{ github.ref }}
+  cancel-in-progress: true
+
+# Variáveis usadas em vários jobs. Centralizar aqui facilita replicar para os outros serviços.
+env:
+  SERVICE_NAME: evaluation-service
+  SERVICE_PATH: techchallange3/docker/evaluation-service
+  GO_VERSION: '1.21'
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: evaluation-service   # precisa existir no ECR com esse nome (ou ajuste aqui)
+
+jobs:
+
+  # ===================================================================================
+  # JOB 1 - BUILD & UNIT TEST
+  # ===================================================================================
+  build-test:
+    name: "1. Build & Unit Test"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.SERVICE_PATH }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # cache automático de módulos Go baseado no go.sum, acelera builds futuros
+          cache: true
+          cache-dependency-path: ${{ env.SERVICE_PATH }}/go.sum
+
+      - name: Baixar dependências
+        run: go mod download
+
+      - name: Compilar (go build)
+        run: go build -v ./...
+
+      - name: Rodar testes unitários (se houver)
+        # go test não falha se não houver arquivos _test.go, então é seguro
+        # deixar isso aqui mesmo antes de existirem testes no projeto.
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload do relatório de cobertura (opcional, útil pra debugar)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ env.SERVICE_NAME }}
+          path: ${{ env.SERVICE_PATH }}/coverage.out
+          if-no-files-found: ignore
+
+  # ===================================================================================
+  # JOB 2 - LINTER / STATIC ANALYSIS (qualidade de código, não segurança)
+  # ===================================================================================
+  lint:
+    name: "2. Linter / Static Analysis"
+    runs-on: ubuntu-latest
+    needs: build-test
+    defaults:
+      run:
+        working-directory: ${{ env.SERVICE_PATH }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: ${{ env.SERVICE_PATH }}
+          # args extras podem ser colocados em um .golangci.yml dentro da pasta do serviço
+          args: --timeout=5m
+
+  # ===================================================================================
+  # JOB 3 - SECURITY SCAN (SAST + SCA)
+  #   - SCA (Trivy fs): vulnerabilidades em DEPENDÊNCIAS (go.mod/go.sum)
+  #   - SAST (gosec):   vulnerabilidades no CÓDIGO-FONTE escrito por vocês
+  #   - Regra de bloqueio: qualquer achado CRÍTICO derruba o pipeline (exit-code 1)
+  # ===================================================================================
+  security-scan:
+    name: "3. Security Scan (SAST & SCA)"
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      # ---------- SCA: vulnerabilidades nas dependências ----------
+      - name: "SCA - Trivy (filesystem / dependências)"
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ env.SERVICE_PATH }}
+          scanners: 'vuln'
+          format: 'table'
+          # Só reporta HIGH/CRITICAL para não poluir o log com ruído
+          severity: 'HIGH,CRITICAL'
+          # exit-code 1 = falha o job se encontrar algo nessa severidade -> bloqueia o pipeline
+          exit-code: '1'
+          ignore-unfixed: true
+
+      # ---------- SAST: vulnerabilidades no código Go ----------
+      - name: "SAST - gosec (código-fonte Go)"
+        uses: securego/gosec@master
+        with:
+          # gosec não tem o nível "CRITICAL" (usa low/medium/high). Usamos "high"
+          # como equivalente ao "crítico" pedido no desafio -> falha o pipeline.
+          args: '-severity high -confidence high -fmt sarif -out gosec-results.sarif ./...'
+        continue-on-error: false
+        working-directory: ${{ env.SERVICE_PATH }}
+
+      - name: Upload do relatório SARIF do gosec (aparece na aba Security do GitHub)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.SERVICE_PATH }}/gosec-results.sarif
+          category: gosec-${{ env.SERVICE_NAME }}
+
+  # ===================================================================================
+  # JOB 4 - DOCKER BUILD & PUSH
+  #   - Builda a imagem
+  #   - Escaneia a IMAGEM com Trivy (container scan) -> falha em CRÍTICO
+  #   - Loga no AWS ECR
+  #   - Envia a imagem com tag v1.0.0-<commit-hash>
+  #   - O PUSH de verdade só acontece em push na main (em PR só builda e escaneia,
+  #     não sobe imagem - assim PR de fora não consegue publicar nada no ECR)
+  # ===================================================================================
+  docker-build-push:
+    name: "4. Docker Build & Push"
+    runs-on: ubuntu-latest
+    needs: security-scan
+    permissions:
+      id-token: write   # necessário se for usar OIDC (recomendado) para logar na AWS
+      contents: read
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Gerar tag da imagem (v1.0.0-<hash curto do commit>)
+        id: vars
+        run: echo "IMAGE_TAG=v1.0.0-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build da imagem Docker (sem push ainda)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.SERVICE_PATH }}
+          push: false
+          load: true   # carrega a imagem no daemon local para o Trivy conseguir escanear
+          tags: ${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ---------- Container Scan: vulnerabilidades na imagem final ----------
+      - name: "Container Scan - Trivy (imagem Docker)"
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'image'
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'          # bloqueia o pipeline se achar HIGH/CRITICAL na imagem
+          ignore-unfixed: true
+
+      # ---------- Autenticação AWS ----------
+      # Opção recomendada: OIDC (sem chaves fixas armazenadas no GitHub).
+      # Requer criar uma IAM Role com trust policy para o GitHub Actions.
+      - name: Configurar credenciais AWS (OIDC)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no Amazon ECR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag e push da imagem para o ECR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          IMAGE_URI="${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}"
+          docker tag ${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }} "$IMAGE_URI"
+          docker push "$IMAGE_URI"
+          echo "Imagem publicada em: $IMAGE_URI"

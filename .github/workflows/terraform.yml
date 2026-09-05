@@ -1,0 +1,260 @@
+# =====================================================================================
+# CI/CD - Infraestrutura (Terraform / IaC)
+# -------------------------------------------------------------------------------------
+# ESTÁGIOS (Jobs), em cadeia (needs:):
+#   1) fmt-validate   -> formatação e sintaxe do Terraform
+#   2) security-scan   -> Trivy em modo "config" escaneia os .tf em busca de
+#                          misconfigurations (SG aberto pro mundo, bucket público,
+#                          RDS sem criptografia etc.) - falha em CRITICAL/HIGH
+#   3) plan             -> terraform plan + comenta o resultado no Pull Request
+#                          (roda em TODO PR e push, mas NUNCA aplica nada)
+#   4) apply             -> terraform apply - roda SÓ em push na main, e exige
+#                          aprovação manual (GitHub Environment protegido)
+#
+# Diferença importante em relação aos workflows dos microsserviços:
+#   - "plan" sempre roda (dá visibilidade do que vai mudar, mesmo em PR de fora)
+#   - "apply" tem um gate de aprovação humana antes de rodar de verdade - infra é
+#     mais arriscada que dar deploy de uma imagem, então aqui vale a pena um "freio de mão".
+#
+# Suporta os 2 cenários do desafio, exatamente como o próprio Terraform (var.is_academy):
+#   - AWS Academy      -> defina a variável de repositório AWS_MODE = academy
+#                          e os secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+#                          AWS_SESSION_TOKEN (sessão temporária, expira em poucas horas).
+#   - Conta AWS normal -> AWS_MODE = normal (ou não defina) + secret
+#                          AWS_TERRAFORM_ROLE_ARN (login via OIDC, sem chave fixa).
+# Detalhes de como configurar cada um: ver TUTORIAL-IAC-ACADEMY.md
+# =====================================================================================
+
+name: CI/CD - Terraform (IaC)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'techchallange3/iac/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'techchallange3/iac/**'
+      - '.github/workflows/terraform.yml'
+
+concurrency:
+  # so 1 plan/apply por vez - evita 2 pipelines mexendo no mesmo state ao mesmo tempo
+  group: terraform-iac
+  cancel-in-progress: false
+
+env:
+  TF_DIR: techchallange3/iac
+  TF_VERSION: '1.9.0'
+  AWS_REGION: us-east-1
+
+permissions:
+  id-token: write        # necessário só no modo OIDC (conta normal); inofensivo no modo Academy
+  contents: read
+  pull-requests: write    # necessário para comentar o plano no PR
+
+jobs:
+
+  # ===================================================================================
+  # JOB 1 - FORMAT & VALIDATE
+  # ===================================================================================
+  fmt-validate:
+    name: "1. Format & Validate"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.TF_DIR }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt (checa formatação, não corrige automaticamente)
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (sem backend - só para validar sintaxe/providers)
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        run: terraform validate
+
+  # ===================================================================================
+  # JOB 2 - SECURITY SCAN (misconfigurations no próprio código de infraestrutura)
+  #   Regra de bloqueio: qualquer achado CRITICAL/HIGH derruba o pipeline.
+  # ===================================================================================
+  security-scan:
+    name: "2. Security Scan (IaC)"
+    runs-on: ubuntu-latest
+    needs: fmt-validate
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: "Trivy config scan (Terraform misconfigurations)"
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'config'
+          scan-ref: ${{ env.TF_DIR }}
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'    # falha o job (e bloqueia o pipeline) se achar algo nessa faixa
+
+      # Alternativa/complemento: checkov, que tem um conjunto de regras diferente
+      # (e às vezes mais específico para Terraform) do que o Trivy. Descomente se
+      # quiser rodar as duas ferramentas em paralelo.
+      # - name: Checkov
+      #   uses: bridgecrewio/checkov-action@master
+      #   with:
+      #     directory: ${{ env.TF_DIR }}
+      #     framework: terraform
+      #     soft_fail: false
+
+  # ===================================================================================
+  # JOB 3 - TERRAFORM PLAN
+  #   Roda sempre (PR e push), mas NUNCA aplica. Comenta o resultado no PR para
+  #   quem for revisar o código já ver o "diff de infraestrutura" antes de aprovar.
+  # ===================================================================================
+  plan:
+    name: "3. Terraform Plan"
+    runs-on: ubuntu-latest
+    needs: security-scan
+    defaults:
+      run:
+        working-directory: ${{ env.TF_DIR }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # A conta usada muda de acordo com a variável de repositório AWS_MODE
+      # (Settings -> Secrets and variables -> Actions -> Variables), do
+      # mesmo jeito que o próprio Terraform troca de comportamento com
+      # is_academy. Só UM dos dois steps abaixo roda de cada vez.
+
+      - name: "Configurar credenciais AWS (AWS Academy - sessão temporária)"
+        if: vars.AWS_MODE == 'academy'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Configurar credenciais AWS (OIDC - conta normal)"
+        if: vars.AWS_MODE != 'academy'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init (com backend remoto S3 + lock no DynamoDB)
+        run: terraform init
+
+      - name: terraform plan
+        id: plan
+        run: terraform plan -no-color -out=tfplan
+        continue-on-error: true   # deixa o job seguir para conseguir comentar o erro no PR também
+
+      - name: Salvar plano legível em texto (para o comentário no PR)
+        if: always()
+        run: terraform show -no-color tfplan > tfplan.txt || echo "Falha ao gerar plan" > tfplan.txt
+
+      - name: Comentar o plano no Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const planPath = path.join(process.env.GITHUB_WORKSPACE, '${{ env.TF_DIR }}', 'tfplan.txt');
+            let plan = fs.readFileSync(planPath, 'utf8');
+            // Comentários de PR têm limite de tamanho - corta planos muito grandes
+            const maxLen = 60000;
+            if (plan.length > maxLen) {
+              plan = plan.slice(0, maxLen) + '\n\n... (plano truncado, veja o log completo do job)';
+            }
+            const body = `#### Terraform Plan 📖\n\n<details><summary>Mostrar plano completo</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n\n</details>`;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Falhar o job se o plan deu erro
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Upload do plano (para o job de apply reaproveitar exatamente o mesmo plano)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_DIR }}/tfplan
+          retention-days: 1
+
+  # ===================================================================================
+  # JOB 4 - TERRAFORM APPLY
+  #   Só roda em push na main. Usa um "environment" do GitHub com aprovação manual
+  #   obrigatória (configurar em Settings -> Environments -> production, ver o
+  #   tutorial). Reaproveita o MESMO plano gerado no job anterior, nunca gera um
+  #   plano novo na hora do apply - isso evita aplicar algo diferente do que foi
+  #   revisado/comentado no PR.
+  # ===================================================================================
+  apply:
+    name: "4. Terraform Apply"
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production   # <- isso é o que ativa o gate de aprovação manual
+    defaults:
+      run:
+        working-directory: ${{ env.TF_DIR }}
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: "Configurar credenciais AWS (AWS Academy - sessão temporária)"
+        if: vars.AWS_MODE == 'academy'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Configurar credenciais AWS (OIDC - conta normal)"
+        if: vars.AWS_MODE != 'academy'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init (com backend remoto)
+        run: terraform init
+
+      - name: Baixar o plano gerado no job anterior
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_DIR }}
+
+      - name: terraform apply (usando o plano exato já revisado)
+        run: terraform apply -auto-approve tfplan
+
+      - name: Mostrar outputs (URLs do ECR, endpoints do RDS/Redis etc.)
+        run: terraform output
