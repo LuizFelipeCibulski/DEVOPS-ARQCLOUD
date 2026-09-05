@@ -67,12 +67,16 @@ variable "node_max_size" {
 
 variable "endpoint_public_access" {
   type    = bool
-  default = true
+  default = false
 }
 
 variable "endpoint_private_access" {
   type    = bool
   default = true
+}
+
+variable "public_access_cidrs" {
+  default = "191.5.186.85/32" 
 }
 
 variable "tags" {

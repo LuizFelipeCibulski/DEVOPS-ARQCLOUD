@@ -66,16 +66,28 @@ resource "aws_iam_role_policy_attachment" "node" {
 # ---------------------------------------------------------------------
 # Cluster EKS
 # ---------------------------------------------------------------------
+resource "aws_kms_key" "eks" {
+  enable_key_rotation = true
+}
+
 
 resource "aws_eks_cluster" "this" {
   name     = var.cluster_name
   role_arn = local.cluster_role_arn
   version  = var.cluster_version
 
+  encryption_config {
+    resources = ["secrets"]
+    provider {
+      key_arn = aws_kms_key.eks.arn
+    }
+  }
+
   vpc_config {
     subnet_ids              = var.control_plane_subnet_ids
     endpoint_public_access  = var.endpoint_public_access
     endpoint_private_access = var.endpoint_private_access
+    public_access_cidrs     = var.public_access_cidrs
   }
 
   tags = var.tags
