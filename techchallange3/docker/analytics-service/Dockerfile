@@ -18,11 +18,7 @@ COPY requirements.txt .
 # --force-reinstall garante que as versões pinadas realmente substituam
 # as que já vêm na imagem base (evita CVEs "fantasmas" de versões antigas
 # sobrevivendo no build final)
-RUN python -m pip install --no-cache-dir --upgrade --force-reinstall \
-        pip==26.2.0 \
-        setuptools==83.0.0 \
-        wheel==0.46.2 && \
-    python -m pip install --no-cache-dir --no-compile -r requirements.txt
+RUN python -m pip install --no-cache-dir --no-compile --prefer-binary -r requirements.txt
 
 COPY app.py .
 
