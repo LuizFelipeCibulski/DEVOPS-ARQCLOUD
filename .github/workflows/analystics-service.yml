@@ -108,7 +108,7 @@ jobs:
 
       # ---------- SCA: vulnerabilidades nas dependências (requirements.txt) ----------
       - name: "SCA - Trivy (filesystem / dependências)"
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: ${{ env.SERVICE_PATH }}
@@ -169,7 +169,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: "Container Scan - Trivy (imagem Docker)"
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'image'
           image-ref: ${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}
