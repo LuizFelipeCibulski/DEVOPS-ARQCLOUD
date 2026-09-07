@@ -1,8 +1,6 @@
 package main
 
 import (
-	_ "crypto/sha256"
-	_ "encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
