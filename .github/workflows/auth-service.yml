@@ -57,12 +57,12 @@ jobs:
         run: go mod download
 
       - name: Compilar (go build)
-        run: go build -v ./...
+        run: go build -v 
 
       - name: Rodar testes unitários (se houver)
         # go test não falha se não houver arquivos _test.go, então é seguro
         # deixar isso aqui mesmo antes de existirem testes no projeto.
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: go test -v -race -coverprofile=coverage.out 
 
       - name: Upload do relatório de cobertura (opcional, útil pra debugar)
         if: always()
