@@ -135,7 +135,7 @@ jobs:
           # como equivalente ao "crítico" pedido no desafio -> falha o pipeline.
           args: '-severity high -confidence high -fmt sarif -out gosec-results.sarif ./...'
         continue-on-error: false
-        working-directory: ${{ env.SERVICE_PATH }}
+        #working-directory: ${{ env.SERVICE_PATH }}
 
       - name: Upload do relatório SARIF do gosec (aparece na aba Security do GitHub)
         if: always()
