@@ -21,13 +21,13 @@ terraform {
   # de lock (fora deste projeto, para nao ter um problema de "galinha e
   # ovo") e descomente o bloco abaixo:
   #
-  # backend "s3" {
-  #   bucket         = "togglemaster-tfstate"
-  #   key            = "tech-challenge-fase2/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "togglemaster-tfstate-lock"
-  #   encrypt        = true
-  # }
+  backend "s3" {
+     bucket         = "togglemaster-tfstate-tibursio"
+     key            = "tech-challenge-fase3/terraform.tfstate"
+     region         = "us-east-1"
+     dynamodb_table = "togglemaster-tfstate-lock-tibursio"
+     encrypt        = true
+  }
 }
 
 provider "aws" {
