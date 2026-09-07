@@ -5,6 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	// Driver PostgreSQL registrado via blank import: sem isso o
+	// sql.Open("pgx", ...) falha com `unknown driver "pgx"`.
+	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/joho/godotenv"
 )
 
@@ -39,7 +43,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Não foi possível conectar ao banco de dados: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	app := &App{
 		DB:         db,

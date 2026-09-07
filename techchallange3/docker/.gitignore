@@ -1,0 +1,13 @@
+# Artefatos gerados pelo build/CI dos microsserviços
+__pycache__/
+*.pyc
+.venv/
+*.sarif
+coverage.out
+coverage.xml
+bandit-results.json
+
+# Binários Go compilados localmente (o nome do módulo vira o nome do binário)
+auth-service/auth-service
+evaluation-service/evaluation-service
+*/meu-app

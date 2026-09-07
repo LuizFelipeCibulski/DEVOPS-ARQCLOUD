@@ -1,42 +1,48 @@
 # ==========================================
 # ESTÁGIO 1: Builder (Compilação com Cache)
 # ==========================================
-FROM golang:1.21-alpine AS builder
+# Go 1.26: versões antigas (1.21) carregam dezenas de CVEs HIGH na stdlib
+# que o Trivy detecta direto no binário compilado (target "gobinary").
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
-# 1. Copia apenas o arquivo de pacotes para o cache do Docker
-COPY go.mod ./
+# 1. Copia apenas os arquivos de dependência para aproveitar o cache do Docker
+COPY go.mod go.sum ./
 
-# 2. Mantém a dependência correta com /stdlib no go.mod para o driver se registrar
-RUN sed -i 's|github.com/jackc/pgx/v4/stdlib|github.com/jackc/pgx/v4/stdlib|g' go.mod
-
-# 3. Baixa as dependências e joga no cache
+# 2. Baixa as dependências (go.sum commitado garante build reproduzível)
 RUN go mod download
 
-# 4. Copia o restante do código fonte
+# 3. Copia o restante do código fonte
 COPY . .
 
-# 5. CORREÇÃO DE IMPORTS: Comentamos os não usados e colocamos o "_" no pgx/v4/stdlib
-RUN sed -i 's|"crypto/sha256"|// "crypto/sha256"|g' handlers.go || true && \
-    sed -i 's|"encoding/hex"|// "encoding/hex"|g' handlers.go || true && \
-    sed -i 's|"fmt"|// "fmt"|g' main.go || true && \
-    sed -i 's|"fmt"|// "fmt"|g' key.go || true && \
-    text_replace='s|"github.com/jackc/pgx/v4/stdlib"|_ "github.com/jackc/pgx/v4/stdlib"|g' && \
-    sed -i "$text_replace" main.go || true && \
-    go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux go build -o meu-app .
+# 4. Build estático (sem libc) - permite rodar em uma base mínima
+#    -trimpath e -ldflags "-s -w" reduzem o binário e removem paths locais
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o meu-app .
 
 # ==========================================
 # ESTÁGIO 2: Imagem Final de Produção
 # ==========================================
-FROM alpine:3.19 AS prod
+FROM alpine:3.24 AS prod
+
+# apk upgrade fecha CVEs de pacotes do SO (ex.: musl) que já vêm na base
+RUN apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates && \
+    addgroup -S appgroup && \
+    adduser -S appuser -G appgroup
 
 WORKDIR /app
 
 # Copia apenas o executável perfeito e limpo
 COPY --from=builder /app/meu-app ./meu-app
 
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
 EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget -qO- http://localhost:8001/health || exit 1
 
 CMD ["./meu-app"]

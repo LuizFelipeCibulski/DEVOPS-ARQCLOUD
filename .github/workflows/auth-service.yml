@@ -26,7 +26,7 @@ concurrency:
 env:
   SERVICE_NAME: auth-service
   SERVICE_PATH: techchallange3/docker/auth-service
-  GO_VERSION: '1.21'
+  GO_VERSION: '1.25'
   AWS_REGION: us-east-1
   ECR_REPOSITORY: auth-service   # precisa existir no ECR com esse nome (ou ajuste aqui)
 
@@ -92,7 +92,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: ${{ env.SERVICE_PATH }}
@@ -128,14 +128,23 @@ jobs:
           ignore-unfixed: true
 
       # ---------- SAST: vulnerabilidades no código Go ----------
-      - name: "SAST - gosec (código-fonte Go)"
-        uses: securego/gosec@master
+      # Rodamos o gosec via "run" (e não pela action securego/gosec) porque a action
+      # é um step "uses" e steps "uses" não aceitam working-directory. Sem isso o gosec
+      # varreria a raiz do repositório inteira e gravaria o SARIF no lugar errado.
+      - name: Configurar Go (necessário para instalar o gosec)
+        uses: actions/setup-go@v5
         with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: "SAST - gosec (código-fonte Go)"
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
           # gosec não tem o nível "CRITICAL" (usa low/medium/high). Usamos "high"
           # como equivalente ao "crítico" pedido no desafio -> falha o pipeline.
-          args: '-severity high -confidence high -fmt sarif -out gosec-results.sarif ./...'
-        continue-on-error: false
-        #working-directory: ${{ env.SERVICE_PATH }}
+          # -stdout/-verbose text deixam o resultado legível no log além do SARIF.
+          gosec -severity high -confidence high \
+                -fmt sarif -out gosec-results.sarif -stdout -verbose text ./...
 
       - name: Upload do relatório SARIF do gosec (aparece na aba Security do GitHub)
         if: always()

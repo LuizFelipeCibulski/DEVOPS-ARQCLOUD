@@ -7,9 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
+	neturl "net/url"
 	"sync"
 	"time"
 )
@@ -58,7 +59,10 @@ func (a *App) getCombinedFlagInfo(flagName string) (*CombinedFlagInfo, error) {
 	// 3. Salvar no Cache
 	jsonData, err := json.Marshal(info)
 	if err == nil {
-		a.RedisClient.Set(ctx, cacheKey, jsonData, CACHE_TTL).Err()
+		// Falha ao gravar no cache não é fatal: só registra e segue com o valor fresco
+		if setErr := a.RedisClient.Set(ctx, cacheKey, jsonData, CACHE_TTL).Err(); setErr != nil {
+			log.Printf("Falha ao gravar cache da flag '%s': %v", flagName, setErr)
+		}
 	}
 
 	return info, nil
@@ -102,17 +106,23 @@ func (a *App) fetchFromServices(flagName string) (*CombinedFlagInfo, error) {
 
 // fetchFlag (função helper)
 func (a *App) fetchFlag(flagName string) (*Flag, error) {
-	url := fmt.Sprintf("%s/flags/%s", a.FlagServiceURL, flagName)
+	url := fmt.Sprintf("%s/flags/%s", a.FlagServiceURL, neturl.PathEscape(flagName))
 
 	apiKey := os.Getenv("SERVICE_API_KEY")
-	req, _ := http.NewRequest("GET", url, nil)
+	// #nosec G704 -- host/esquema vêm de env (FLAG/TARGETING_SERVICE_URL), não do usuário;
+	// o único trecho influenciado pela requisição é o path, já sanitizado com neturl.PathEscape.
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao montar requisição: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	
+	// #nosec G704 -- ver justificativa acima
 	resp, err := a.HttpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao chamar flag-service: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, &NotFoundError{flagName}
@@ -121,7 +131,10 @@ func (a *App) fetchFlag(flagName string) (*Flag, error) {
 		return nil, fmt.Errorf("flag-service retornou status %d", resp.StatusCode)
 	}
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao ler resposta: %w", err)
+	}
 	var flag Flag
 	if err := json.Unmarshal(body, &flag); err != nil {
 		return nil, fmt.Errorf("erro ao desserializar resposta do flag-service: %w", err)
@@ -130,16 +143,22 @@ func (a *App) fetchFlag(flagName string) (*Flag, error) {
 }
 
 func (a *App) fetchRule(flagName string) (*TargetingRule, error) {
-	url := fmt.Sprintf("%s/rules/%s", a.TargetingServiceURL, flagName)
+	url := fmt.Sprintf("%s/rules/%s", a.TargetingServiceURL, neturl.PathEscape(flagName))
 	apiKey := os.Getenv("SERVICE_API_KEY") // Usa a mesma chave
-	req, _ := http.NewRequest("GET", url, nil)
+	// #nosec G704 -- host/esquema vêm de env (FLAG/TARGETING_SERVICE_URL), não do usuário;
+	// o único trecho influenciado pela requisição é o path, já sanitizado com neturl.PathEscape.
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao montar requisição: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	
+	// #nosec G704 -- ver justificativa acima
 	resp, err := a.HttpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao chamar targeting-service: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, &NotFoundError{flagName} // Não é um erro fatal
@@ -148,7 +167,10 @@ func (a *App) fetchRule(flagName string) (*TargetingRule, error) {
 		return nil, fmt.Errorf("targeting-service retornou status %d", resp.StatusCode)
 	}
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao ler resposta: %w", err)
+	}
 	var rule TargetingRule
 	if err := json.Unmarshal(body, &rule); err != nil {
 		return nil, fmt.Errorf("erro ao desserializar resposta do targeting-service: %w", err)
