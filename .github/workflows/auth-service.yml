@@ -204,11 +204,20 @@ jobs:
       # ---------- Autenticação AWS ----------
       # Opção recomendada: OIDC (sem chaves fixas armazenadas no GitHub).
       # Requer criar uma IAM Role com trust policy para o GitHub Actions.
-      - name: Configurar credenciais AWS (OIDC)
+      #- name: Configurar credenciais AWS (OIDC)
+      #  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      #  uses: aws-actions/configure-aws-credentials@v4
+      #  with:
+      #    role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+      #    aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar credenciais AWS (Academy - Access Keys temporárias)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login no Amazon ECR
