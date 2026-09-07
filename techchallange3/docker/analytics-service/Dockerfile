@@ -19,6 +19,9 @@ COPY app.py .
 # ==========================================
 FROM python:3.11-alpine AS prod
 
+# Atualização de pacotes
+RUN apk update && apk upgrade
+
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
