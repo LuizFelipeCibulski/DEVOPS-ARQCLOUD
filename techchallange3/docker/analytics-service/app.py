@@ -144,6 +144,7 @@ def health():
 
 # --- Inicialização ---
 
+
 def start_worker():
     """ Inicia o worker SQS em uma thread separada """
     worker_thread = threading.Thread(target=sqs_worker_loop, daemon=True)
@@ -151,10 +152,11 @@ def start_worker():
 
 # Inicia o worker SQS em uma thread de background
 # Isso garante que ele inicie tanto com 'flask run' quanto com 'gunicorn'
+
+
 start_worker()
 
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 8005))
     app.run(host='0.0.0.0', port=port, debug=False)
-
