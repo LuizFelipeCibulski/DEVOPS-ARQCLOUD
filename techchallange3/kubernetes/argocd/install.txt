@@ -1,3 +1,74 @@
+# =====================================================================
+# 1. Instalar o Argo CD
+# =====================================================================
 kubectl create namespace argocd
 kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
+
+# =====================================================================
+# 2. Configurar o rootpath (necessário para a Opção A do ingressroute)
+# ---------------------------------------------------------------------
+# Sem isso o Argo CD gera links absolutos para / e a UI quebra atrás do
+# PathPrefix(/argocd). Pule esta etapa se for usar a Opção B (hostname).
+#
+# ATENÇÃO: um novo `kubectl apply --force-conflicts` do install.yaml
+# acima SOBRESCREVE este ConfigMap e a UI volta a quebrar. Se reinstalar
+# ou atualizar o Argo CD, rode este passo de novo.
+# =====================================================================
+kubectl patch configmap argocd-cmd-params-cm -n argocd --type merge \
+  -p '{"data":{"server.rootpath":"/argocd"}}'
+
+kubectl rollout restart deployment argocd-server -n argocd
+kubectl rollout status  deployment argocd-server -n argocd
+
+
+# =====================================================================
+# 3. Publicar a rota no Traefik
+# =====================================================================
+kubectl apply -f ingressroute.yaml
+
+
+# =====================================================================
+# 4. Descobrir a URL e a senha inicial
+# =====================================================================
+# Hostname do ELB que o Traefik expõe:
+kubectl get svc -n traefik traefik \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{"\n"}'
+# Acesse:  https://<hostname-acima>/argocd
+# O certificado é o self-signed padrão do Traefik - o aviso do navegador
+# é esperado.
+
+# Usuário: admin
+# Senha inicial (gerada na instalação):
+kubectl get secret argocd-initial-admin-secret -n argocd \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+
+# Troque a senha e apague o secret depois do primeiro login:
+#   argocd account update-password
+#   kubectl delete secret argocd-initial-admin-secret -n argocd
+
+
+# =====================================================================
+# 5. (opcional) CLI
+# ---------------------------------------------------------------------
+# Atrás de PathPrefix o gRPC nativo não passa; use --grpc-web.
+# =====================================================================
+# argocd login <hostname-do-elb>/argocd --username admin --grpc-web --insecure
+
+
+# =====================================================================
+# 6. App-of-apps: colocar o GitOps sob controle do git
+# ---------------------------------------------------------------------
+# As Applications deixaram de ser criadas pela UI e viraram arquivos em
+# argocd/apps/. Aplique a raiz UMA vez; daí em diante, todo push na main
+# atualiza as Applications sozinho (inclusive a própria raiz).
+# =====================================================================
+kubectl apply -f techchallange3/kubernetes/argocd/apps/root.yaml
+
+# Acompanhe as ondas subindo na ordem:
+#   -20  external-secrets, keda   (instalam as CRDs)
+#   -10  secret-stores            (ClusterSecretStore)
+#    20  auth-service             (+ hook PostSync que cunha a API key)
+#    30  flag-service, targeting-service
+#    40  evaluation-service, analytics-service
+kubectl get applications -n argocd -w

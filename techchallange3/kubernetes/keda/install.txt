@@ -1,28 +1,28 @@
-# Adicionar o repositório oficial do KEDA
-helm repo add kedacore https://kedacore.github.io/charts
-helm repo update
-
-# Criar namespace dedicado
-kubectl create namespace keda
-
-# Instalar o KEDA
-helm install keda kedacore/keda --namespace keda
-
-aws iam create-policy \
-  --policy-name KedaSQSPolicy \
-  --policy-document file://keda-sqs-policy.json
-
-
-eksctl create iamserviceaccount \
-  --name keda-operator \
-  --namespace keda \
-  --cluster togglemaster-prod \
-  --attach-policy-arn arn:aws:iam::628409561285:policy/KedaSQSPolicy \
-  --approve \
-  --override-existing-serviceaccounts
-
-
-kubectl annotate serviceaccount keda-operator \
-  -n keda \
-  eks.amazonaws.com/role-arn=arn:aws:iam::628409561285:role/KedaSQSPolicy \
-  --overwrite
+# =====================================================================
+# KEDA - NÃO instale à mão
+# =====================================================================
+# O KEDA passou a ser gerenciado pelo Argo CD:
+#   techchallange3/kubernetes/argocd/apps/00-keda.yaml
+#
+# E a permissão de ler a fila SQS passou a ser gerenciada pelo Terraform:
+#   techchallange3/iac/main.tf  ->  module.irsa_keda
+#
+# Ou seja, os dois comandos que ficavam aqui saíram de cena:
+#
+#   helm install keda kedacore/keda --namespace keda
+#     -> agora é a Application `keda` (onda -20)
+#
+#   eksctl create iamserviceaccount --name keda-operator ...
+#     -> agora é module.irsa_keda; o ARN é anotado na ServiceAccount
+#        pelos values do Helm dentro da própria Application
+#
+# Se você instalou o KEDA à mão antes, remova o release para o Argo CD
+# poder assumir a posse sem conflito de ownership:
+#
+#   helm uninstall keda -n keda
+#
+# Os dois .json deste diretório ficaram como referência histórica do
+# escopo da policy; quem vale agora é o documento gerado em
+# data.aws_iam_policy_document.keda (iac/main.tf). Note que
+# sqs:ListQueues não aceita permissão por recurso e precisa de "*" —
+# por isso lá ele está num statement separado.

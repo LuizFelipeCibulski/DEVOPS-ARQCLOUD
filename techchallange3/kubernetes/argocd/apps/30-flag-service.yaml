@@ -1,0 +1,32 @@
+# Onda 30: depende só do próprio banco; sobe depois do auth porque valida API key contra ele.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flag-service
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+    targetRevision: main
+    path: techchallange3/kubernetes/flag-service
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: flag-service
+  syncPolicy:
+    automated:
+      prune: true      # apagar um manifesto do git apaga o recurso no cluster
+      selfHeal: true   # desfaz mudança feita à mão via kubectl
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      # A primeira implantação depende do ESO já ter materializado os
+      # Secrets. Se ainda não materializou, o sync falha e volta.
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

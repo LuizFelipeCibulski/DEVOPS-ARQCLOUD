@@ -36,6 +36,17 @@ manage_eks_cluster = true # false = so a VPC; voce cria o EKS pelo Console
 # `tofu import` do README em vez de deixar o Terraform criar outra.
 # github_oidc_role_name = "github-actions-ecr-push"
 
+# ------------------------------------------------------------------
+# Acesso a API do cluster EKS.
+# Por padrao o endpoint e PRIVADO - kubectl so funciona de dentro da
+# VPC. Para rodar kubectl da sua maquina, ligue o endpoint publico e
+# restrinja ao seu IP (e AQUI que o seu IP entra, nao no security
+# group):
+#   curl -s https://checkip.amazonaws.com
+# ------------------------------------------------------------------
+# endpoint_public_access = true
+# public_access_cidrs    = ["203.0.113.10/32"]
+
 azs                      = ["us-east-1a", "us-east-1b"]
 vpc_cidr                 = "10.0.0.0/16"
 public_subnet_cidrs      = ["10.0.0.0/24", "10.0.1.0/24"]

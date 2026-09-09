@@ -1,0 +1,32 @@
+# Onda 30: mesma situação do flag-service.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: targeting-service
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+    targetRevision: main
+    path: techchallange3/kubernetes/targeting-service
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: targeting-service
+  syncPolicy:
+    automated:
+      prune: true      # apagar um manifesto do git apaga o recurso no cluster
+      selfHeal: true   # desfaz mudança feita à mão via kubectl
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      # A primeira implantação depende do ESO já ter materializado os
+      # Secrets. Se ainda não materializou, o sync falha e volta.
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

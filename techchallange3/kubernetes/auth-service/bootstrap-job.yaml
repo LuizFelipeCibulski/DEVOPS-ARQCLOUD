@@ -1,0 +1,123 @@
+# =====================================================================
+# Bootstrap: cunha a SERVICE_API_KEY e guarda no Secrets Manager
+# ---------------------------------------------------------------------
+# Por que este Job existe:
+#
+# O evaluation-service precisa de uma SERVICE_API_KEY para chamar o
+# flag-service e o targeting-service. Essa chave não pode ser gerada
+# pelo Terraform nem escrita à mão: quem a emite é o próprio
+# auth-service, via POST /admin/keys autenticado com a MASTER_KEY, e ele
+# devolve o texto plano UMA ÚNICA VEZ (o banco guarda apenas o hash
+# SHA-256 - ver docker/auth-service/handlers.go:58 e key.go).
+#
+# Daí a ordem obrigatória da primeira implantação:
+#   Terraform gera a MASTER_KEY  ->  auth-service sobe com ela
+#   ->  este Job cunha a SERVICE_API_KEY  ->  grava no Secrets Manager
+#   ->  o ESO materializa no namespace do evaluation  ->  evaluation sobe
+#
+# É um hook PostSync do Argo CD: roda depois que o auth-service está
+# Healthy, não junto. Sem isso, o Job tentaria falar com um Service que
+# ainda não tem endpoint.
+# =====================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-bootstrap
+  namespace: auth-service
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    # BeforeHookCreation: o Job anterior só é apagado quando um novo
+    # precisa nascer. Mantém os logs disponíveis para depuração entre
+    # sincronizações, ao contrário de HookSucceeded.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # O Job é idempotente (checa o cofre antes de cunhar), então repetir é
+  # inofensivo. O limite existe só para não girar para sempre se o
+  # auth-service estiver quebrado de verdade.
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: auth-bootstrap
+    spec:
+      restartPolicy: Never
+      serviceAccountName: auth-bootstrap
+      containers:
+        - name: bootstrap
+          # Esta imagem já traz aws-cli, curl e jq - por isso um único
+          # container resolve, sem initContainers.
+          image: public.ecr.aws/aws-cli/aws-cli:2.36.41
+          command: ["/bin/bash", "-c"]
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: SECRET_ID
+              value: togglemaster/prod/service-api-key
+            - name: AUTH_URL
+              value: http://auth-service.auth-service.svc.cluster.local
+            - name: MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: auth-secrets
+                  key: MASTER_KEY
+          args:
+            - |
+              set -euo pipefail
+
+              # ---- 1. Idempotência ------------------------------------
+              # Sem isto, cada sincronização do Argo CD cunharia uma chave
+              # nova e sobrescreveria a anterior. O evaluation-service, que
+              # já teria a antiga em memória, passaria a receber 403.
+              atual=$(aws secretsmanager get-secret-value \
+                        --secret-id "$SECRET_ID" \
+                        --query SecretString --output text 2>/dev/null || echo '')
+              if [ -n "$atual" ] && echo "$atual" | jq -e '.SERVICE_API_KEY // empty' >/dev/null 2>&1; then
+                echo "SERVICE_API_KEY já existe em $SECRET_ID - nada a fazer."
+                exit 0
+              fi
+
+              # ---- 2. Espera o auth-service atender -------------------
+              echo "Aguardando o auth-service responder em $AUTH_URL/health ..."
+              pronto=nao
+              for i in $(seq 1 60); do
+                if curl -sf --max-time 5 "$AUTH_URL/health" >/dev/null 2>&1; then
+                  pronto=sim; break
+                fi
+                sleep 5
+              done
+              if [ "$pronto" != "sim" ]; then
+                echo "ERRO: auth-service não respondeu em 5 minutos." >&2
+                exit 1
+              fi
+              echo "auth-service no ar."
+
+              # ---- 3. Cunha a chave -----------------------------------
+              resposta=$(curl -sf --max-time 15 -X POST "$AUTH_URL/admin/keys" \
+                           -H "Authorization: Bearer $MASTER_KEY" \
+                           -H "Content-Type: application/json" \
+                           -d '{"name":"evaluation-service"}')
+
+              chave=$(echo "$resposta" | jq -r '.key // empty')
+              if [ -z "$chave" ]; then
+                # Não imprime a resposta inteira: ela contém a chave em
+                # texto plano quando o parse falha por outro motivo.
+                echo "ERRO: o auth-service não devolveu o campo .key" >&2
+                exit 1
+              fi
+              echo "Chave cunhada (prefixo ${chave:0:12}...)."
+
+              # ---- 4. Guarda no cofre ---------------------------------
+              aws secretsmanager put-secret-value \
+                --secret-id "$SECRET_ID" \
+                --secret-string "$(jq -n --arg k "$chave" '{SERVICE_API_KEY:$k}')" \
+                >/dev/null
+
+              echo "SERVICE_API_KEY gravada em $SECRET_ID."
+              echo "O ESO materializa no evaluation-service em até 1 minuto."
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

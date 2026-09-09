@@ -211,16 +211,67 @@ jobs:
           docker push "$IMAGE_URI"
           echo "Imagem publicada em: $IMAGE_URI"
     
+
+      # ---------- GitOps: o Argo CD sincroniza a partir daqui ----------
+      # Duas decisões que não são óbvias:
+      #
+      # 1. sed em vez de yq. O yq resolveria em uma linha, mas reescreve o
+      #    arquivo inteiro no estilo de indentação dele - cada deploy viraria
+      #    um diff de 40 linhas em vez de 1, poluindo o histórico que o Argo CD
+      #    usa como fonte da verdade. O sed é ancorado no nome do repositório
+      #    ECR e vem cercado de verificação antes e depois.
+      #
+      # 2. rebase-e-tenta-de-novo. Um commit que toca dois serviços dispara
+      #    dois workflows, que terminam o build juntos e tentam commitar na
+      #    main ao mesmo tempo. O segundo push morre com non-fast-forward e o
+      #    manifesto fica com a tag velha - sem erro visível, o Argo CD
+      #    sincroniza a imagem antiga. `concurrency` não serviria: a fila do
+      #    GitHub guarda só UM job pendente por grupo e cancela os anteriores,
+      #    então com 5 serviços simultâneos três atualizações sumiriam caladas.
       - name: Atualizar tag no Deployment YAML
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: fjogeleit/yaml-update-action@v0.15.0
-        with:
-          valueFile: 'techchallange3/kubernetes/analytics-service/deployment.yaml'
-          propertyPath: 'spec.template.spec.containers[0].image'
-          value: '${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}'
-          branch: main
-          commitChange: true
-          message: 'chore: update image tag to ${{ steps.vars.outputs.IMAGE_TAG }}'
-          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          IMAGE_URI: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}
+          MANIFESTO: techchallange3/kubernetes/analytics-service/deployment.yaml
+        run: |
+          set -euo pipefail
 
-      
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for tentativa in 1 2 3 4 5; do
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+
+            alvos=$(grep -c "image:.*/${ECR_REPOSITORY}:" "$MANIFESTO" || true)
+            if [ "$alvos" -ne 1 ]; then
+              echo "::error::Esperava 1 linha de imagem de ${ECR_REPOSITORY} em $MANIFESTO, encontrei $alvos."
+              exit 1
+            fi
+
+            sed -i -E "s|(^[[:space:]]*-?[[:space:]]*image:[[:space:]]*).*/${ECR_REPOSITORY}:.*|\1${IMAGE_URI}|" "$MANIFESTO"
+
+            if ! grep -q "image: ${IMAGE_URI}$" "$MANIFESTO"; then
+              echo "::error::O sed não aplicou a nova tag em $MANIFESTO."
+              exit 1
+            fi
+
+            if git diff --quiet -- "$MANIFESTO"; then
+              echo "Manifesto já aponta para $IMAGE_URI - nada a commitar."
+              exit 0
+            fi
+
+            git add "$MANIFESTO"
+            git commit --quiet -m "chore(${{ env.SERVICE_NAME }}): imagem ${{ steps.vars.outputs.IMAGE_TAG }}"
+
+            if git push --quiet origin HEAD:main; then
+              echo "Manifesto atualizado para $IMAGE_URI"
+              exit 0
+            fi
+
+            echo "Push rejeitado (tentativa $tentativa/5) - outro serviço commitou antes. Refazendo sobre a main nova."
+            sleep $(( RANDOM % 5 + 2 ))
+          done
+
+          echo "::error::Não consegui atualizar $MANIFESTO após 5 tentativas."
+          exit 1

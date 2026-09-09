@@ -6,3 +6,7 @@ metadata:
 data:
   PORT: "8005"
   AWS_REGION: "us-east-1"
+  # Não são secrets - identificadores públicos, versionados de propósito.
+  # Valores vêm de `tofu output app_config_values`.
+  AWS_SQS_URL: "https://sqs.us-east-1.amazonaws.com/628409561285/evaluation"
+  AWS_DYNAMODB_TABLE: "ToggleMasterAnalytics"

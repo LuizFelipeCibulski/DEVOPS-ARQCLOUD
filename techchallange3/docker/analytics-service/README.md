@@ -103,3 +103,5 @@ INFO:Evento ... (Flag: enable-new-dashboard) salvo no DynamoDB.
 Vá até o console da AWS, abra o **DynamoDB**, selecione a tabela `ToggleMasterAnalytics` e clique em "Explore table items".
 
 Você verá os itens que o worker acabou de inserir.
+
+pipe

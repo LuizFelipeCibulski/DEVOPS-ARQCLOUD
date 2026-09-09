@@ -81,3 +81,47 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "create_terraform_role" {
+  description = <<-EOT
+    Cria uma SEGUNDA role, para o workflow terraform.yml
+    (secret AWS_TERRAFORM_ROLE_ARN). Ela e separada da role de push no
+    ECR de proposito: uma role capaz de destruir RDS/EKS nao deve ser a
+    mesma que 5 pipelines de microsservico usam para publicar imagem.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "terraform_role_name" {
+  description = "Nome da role do Terraform. null = \"<project_name>-github-terraform\""
+  type        = string
+  default     = null
+}
+
+variable "terraform_policy_arns" {
+  description = <<-EOT
+    Policies gerenciadas anexadas a role do Terraform. O default e
+    PowerUserAccess + IAMFullAccess: o PowerUser cobre VPC/EKS/RDS/SQS/
+    DynamoDB/Secrets Manager mas NAO cobre IAM, e esta stack cria roles
+    (IRSA, EKS). Para producao de verdade, troque por uma policy escrita
+    a mao com o escopo exato.
+  EOT
+  type        = list(string)
+  default = [
+    "arn:aws:iam::aws:policy/PowerUserAccess",
+    "arn:aws:iam::aws:policy/IAMFullAccess",
+  ]
+}
+
+variable "tfstate_bucket" {
+  description = "Bucket S3 do state (para a policy da role do Terraform)"
+  type        = string
+  default     = ""
+}
+
+variable "tfstate_lock_table" {
+  description = "Tabela DynamoDB de lock do state"
+  type        = string
+  default     = ""
+}

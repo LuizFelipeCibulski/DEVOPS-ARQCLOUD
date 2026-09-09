@@ -73,3 +73,40 @@ output "github_actions_secret_command" {
     : "OIDC desligado (enable_github_oidc = false ou modo Academy) - use ../update-secrets-aws.sh com as chaves temporarias do Learner Lab."
   )
 }
+
+output "github_terraform_role_arn" {
+  description = "ARN da role do terraform.yml - cadastrar como secret AWS_TERRAFORM_ROLE_ARN"
+  value       = var.enable_github_oidc && !var.is_academy && var.create_terraform_role ? module.github_oidc[0].terraform_role_arn : null
+}
+
+# ---------------------------------------------------------------------
+# Camada de aplicacao - valores que os manifestos do Kubernetes esperam
+# ---------------------------------------------------------------------
+
+output "irsa_role_arns" {
+  description = "ARNs para anotar nas ServiceAccounts (eks.amazonaws.com/role-arn)"
+  value = local.app_stack_enabled ? {
+    "external-secrets/external-secrets"     = module.irsa_external_secrets[0].role_arn
+    "auth-service/auth-bootstrap"           = module.irsa_auth_bootstrap[0].role_arn
+    "analytics-service/analytics-service"   = module.irsa_analytics[0].role_arn
+    "evaluation-service/evaluation-service" = module.irsa_evaluation[0].role_arn
+    "keda/keda-operator"                    = module.irsa_keda[0].role_arn
+  } : null
+}
+
+output "secrets_manager_paths" {
+  description = "Caminhos no Secrets Manager usados no remoteRef.key dos ExternalSecret"
+  value = local.app_stack_enabled ? merge(
+    module.app_secrets[0].secret_names,
+    { "service-api-key" = module.app_secrets[0].service_api_key_name }
+  ) : null
+}
+
+output "app_config_values" {
+  description = "Valores nao-secretos que os ConfigMaps do Kubernetes precisam ter"
+  value = {
+    AWS_REGION         = var.aws_region
+    AWS_SQS_URL        = module.sqs.queue_url
+    AWS_DYNAMODB_TABLE = module.dynamodb.table_name
+  }
+}

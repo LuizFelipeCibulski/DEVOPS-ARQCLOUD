@@ -127,3 +127,62 @@ resource "aws_iam_role_policy" "ecr_push" {
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.ecr_push.json
 }
+
+# ---------------------------------------------------------------------
+# Role do workflow terraform.yml (secret AWS_TERRAFORM_ROLE_ARN)
+# ---------------------------------------------------------------------
+# Problema do ovo e da galinha: quem cria esta role e o Terraform, mas
+# quem roda o Terraform no CI precisa dela. Resolve-se com UM apply local
+# (credencial do `aws configure`), depois o pipeline se sustenta sozinho.
+# O README do iac documenta o passo.
+
+locals {
+  terraform_role_name = coalesce(var.terraform_role_name, "${var.project_name}-github-terraform")
+}
+
+resource "aws_iam_role" "terraform" {
+  count = var.create_terraform_role ? 1 : 0
+
+  name                 = local.terraform_role_name
+  description          = "Assumida pelo workflow terraform.yml de ${var.github_repository}"
+  assume_role_policy   = data.aws_iam_policy_document.assume_role.json
+  max_session_duration = 3600
+
+  tags = merge(var.tags, {
+    Name = local.terraform_role_name
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "terraform" {
+  for_each = var.create_terraform_role ? toset(var.terraform_policy_arns) : toset([])
+
+  role       = aws_iam_role.terraform[0].name
+  policy_arn = each.value
+}
+
+# O state fica num bucket S3 com lock no DynamoDB (ver providers.tf). O
+# PowerUserAccess ja cobre os dois, mas deixamos explicito para quem
+# trocar as policies por algo mais restrito nao esquecer desta parte.
+data "aws_iam_policy_document" "terraform_state" {
+  count = var.create_terraform_role ? 1 : 0
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["arn:aws:s3:::${var.tfstate_bucket}", "arn:aws:s3:::${var.tfstate_bucket}/*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
+    resources = ["arn:aws:dynamodb:*:*:table/${var.tfstate_lock_table}"]
+  }
+}
+
+resource "aws_iam_role_policy" "terraform_state" {
+  count = var.create_terraform_role ? 1 : 0
+
+  name   = "tfstate-backend"
+  role   = aws_iam_role.terraform[0].id
+  policy = data.aws_iam_policy_document.terraform_state[0].json
+}

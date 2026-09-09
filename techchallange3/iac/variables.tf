@@ -114,6 +114,33 @@ variable "node_max_size" {
   default = 4
 }
 
+variable "endpoint_public_access" {
+  description = <<-EOT
+    Expoe o endpoint da API do cluster na internet. false = so da pra
+    rodar kubectl de dentro da VPC (bastion/SSM). true = da pra rodar da
+    sua maquina, mas SEMPRE junto com public_access_cidrs restrito.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "endpoint_private_access" {
+  description = "Mantem o endpoint acessivel de dentro da VPC (os nos dependem disso - nao desligue)"
+  type        = bool
+  default     = true
+}
+
+variable "public_access_cidrs" {
+  description = <<-EOT
+    Quem pode falar com a API do cluster pela internet. E AQUI que entra
+    o seu IP (formato "203.0.113.10/32"), nao no security group. O
+    default 0.0.0.0/0 so nao e um problema porque endpoint_public_access
+    e false por padrao - se ligar um, restrinja o outro.
+  EOT
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 # ---------------------------------------------------------------------
 # ECR
 # ---------------------------------------------------------------------
@@ -241,4 +268,36 @@ variable "create_github_oidc_provider" {
   EOT
   type        = bool
   default     = true
+}
+
+variable "enable_app_platform" {
+  description = <<-EOT
+    Liga a camada de aplicacao: secrets no Secrets Manager + as 5 roles
+    IRSA (External Secrets, bootstrap do auth, analytics, evaluation,
+    KEDA). Exige conta normal e cluster gerenciado aqui - em Academy o
+    count zera sozinho.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "create_terraform_role" {
+  description = <<-EOT
+    Cria a role do workflow terraform.yml (secret AWS_TERRAFORM_ROLE_ARN),
+    separada da role de push no ECR. Exige enable_github_oidc = true.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "tfstate_bucket" {
+  description = "Bucket S3 do state remoto - precisa bater com o backend em providers.tf"
+  type        = string
+  default     = "togglemaster-tfstate-tib"
+}
+
+variable "tfstate_lock_table" {
+  description = "Tabela DynamoDB de lock do state - precisa bater com o backend em providers.tf"
+  type        = string
+  default     = "togglemaster-tfstate-lock-tib"
 }

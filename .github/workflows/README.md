@@ -309,6 +309,32 @@ Com OIDC o GitHub troca um token efêmero por credenciais temporárias da AWS vi
 `role-to-assume`. **Não existe `AWS_SECRET_ACCESS_KEY` guardado no repositório** —
 que é o jeito certo. Requer uma IAM Role com *trust policy* apontando pro GitHub.
 
+**Último step: GitOps (o Argo CD sincroniza a partir daqui).**
+Depois do push no ECR, o job reescreve a tag em
+`techchallange3/kubernetes/<serviço>/deployment.yaml` e commita na `main`. O
+Argo CD observa esse diretório e aplica no cluster — o pipeline **não** roda
+`kubectl apply`; o git é a fonte da verdade.
+
+Duas escolhas nesse step que parecem estranhas até você tropeçar nelas:
+
+- **`sed` em vez de uma action de "update yaml".** O `yq` (e as actions que o
+  embrulham) reescrevem o arquivo inteiro no estilo de indentação deles: cada
+  deploy viraria um diff de ~40 linhas em vez de 1, poluindo justamente o
+  histórico que o Argo CD usa como fonte da verdade. O `sed` é ancorado no nome
+  do repositório ECR e vem cercado de verificação antes (a linha existe, e é só
+  uma) e depois (a nova tag entrou).
+- **Laço de `rebase`-e-tenta-de-novo, e não `concurrency`.** Um commit que toca
+  dois serviços dispara dois workflows, que terminam o build juntos e tentam
+  commitar na `main` ao mesmo tempo; o segundo push morre com non-fast-forward
+  e o manifesto fica com a tag velha — **sem erro visível**, o Argo CD apenas
+  sincroniza a imagem antiga. `concurrency` não resolve: a fila do GitHub guarda
+  só **um** job pendente por grupo e cancela os anteriores, então com 5 serviços
+  simultâneos três atualizações sumiriam caladas.
+
+Por isso o job tem `contents: write` (os outros jobs ficam em `read`). O push é
+feito com o `GITHUB_TOKEN`, que por design **não** dispara novos workflows — não
+há risco de loop. O `paths` de cada workflow também não cobre `kubernetes/**`.
+
 ---
 
 ## 4. Tabela-resumo dos portões de segurança

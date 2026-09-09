@@ -1,0 +1,36 @@
+# =====================================================================
+# App-of-apps: a raiz que versiona todas as outras Applications
+# ---------------------------------------------------------------------
+# Antes, as 5 Applications existiam só dentro do cluster (criadas pela
+# UI). Se o cluster caísse, a configuração do GitOps ia junto - e não
+# havia histórico de quem mudou o quê. Agora elas são arquivos neste
+# diretório, e esta Application aplica o diretório inteiro.
+#
+# Ela gerencia a si mesma: root.yaml está no path que ela sincroniza.
+#
+# Aplique UMA vez à mão; daqui em diante tudo vem de push no git:
+#   kubectl apply -f techchallange3/kubernetes/argocd/apps/root.yaml
+# =====================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    # Sem isto, apagar a root deixaria os filhos órfãos no cluster.
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+    targetRevision: main
+    path: techchallange3/kubernetes/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

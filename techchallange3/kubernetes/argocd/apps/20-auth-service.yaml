@@ -1,0 +1,32 @@
+# Onda 20: o primeiro serviço a subir. O hook PostSync dele (bootstrap-job.yaml) cunha a SERVICE_API_KEY que o evaluation precisa - por isso ele vem antes de todos.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: auth-service
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+    targetRevision: main
+    path: techchallange3/kubernetes/auth-service
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: auth-service
+  syncPolicy:
+    automated:
+      prune: true      # apagar um manifesto do git apaga o recurso no cluster
+      selfHeal: true   # desfaz mudança feita à mão via kubectl
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      # A primeira implantação depende do ESO já ter materializado os
+      # Secrets. Se ainda não materializou, o sync falha e volta.
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

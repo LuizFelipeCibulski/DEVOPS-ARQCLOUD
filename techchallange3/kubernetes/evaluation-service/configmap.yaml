@@ -6,5 +6,8 @@ metadata:
 data:
   PORT: "8004"
   AWS_REGION: "us-east-1"
+  # Não é secret - é identificador público, e fica versionado de
+  # propósito. Valor vem de `tofu output app_config_values`.
+  AWS_SQS_URL: "https://sqs.us-east-1.amazonaws.com/628409561285/evaluation"
   FLAG_SERVICE_URL: "http://flag-service.flag-service.svc.cluster.local"
   TARGETING_SERVICE_URL: "http://targeting-service.targeting-service.svc.cluster.local"

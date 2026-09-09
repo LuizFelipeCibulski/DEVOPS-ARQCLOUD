@@ -1,0 +1,42 @@
+# Onda -20: KEDA. Instalado junto com o ESO porque também traz CRDs
+# (ScaledObject, TriggerAuthentication) que o analytics-service usa —
+# sem ele a onda 40 falha com "no matches for kind ScaledObject".
+#
+# Substitui o `helm install keda` manual que estava em
+# kubernetes/keda/install.txt. O `eksctl create iamserviceaccount` de lá
+# também sai de cena: a role vem do Terraform (module.irsa_keda) e é
+# anotada aqui, nos values.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  project: default
+  source:
+    repoURL: https://kedacore.github.io/charts
+    chart: keda
+    targetRevision: 2.20.2
+    helm:
+      releaseName: keda
+      values: |
+        # IRSA para o operador ler a profundidade da fila SQS. O
+        # TriggerAuthentication do analytics-service usa
+        # `podIdentity.provider: aws`, que depende exatamente disto.
+        serviceAccount:
+          operator:
+            annotations:
+              eks.amazonaws.com/role-arn: arn:aws:iam::628409561285:role/togglemaster-keda-operator
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # As CRDs do KEDA também estouram o limite do apply client-side.
+      - ServerSideApply=true

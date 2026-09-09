@@ -15,6 +15,9 @@ spec:
       labels:
         app: analytics-service
     spec:
+      # IRSA: esta SA carrega a anotação com o ARN da role. É o que
+      # substitui AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN.
+      serviceAccountName: analytics-service
       containers:
       - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/analytics-service:latest
         name: analytics-service
@@ -31,29 +34,14 @@ spec:
               key: AWS_REGION
          - name: AWS_SQS_URL
            valueFrom:
-            secretKeyRef:
-              name: analytics-secrets
+            configMapKeyRef:
+              name: analytics-cm
               key: AWS_SQS_URL
          - name: AWS_DYNAMODB_TABLE
            valueFrom:
-            secretKeyRef:
-              name: analytics-secrets
+            configMapKeyRef:
+              name: analytics-cm
               key: AWS_DYNAMODB_TABLE
-         - name: AWS_ACCESS_KEY_ID
-           valueFrom:
-            secretKeyRef:
-              name: analytics-secrets
-              key: AWS_ACCESS_KEY_ID
-         - name: AWS_SECRET_ACCESS_KEY
-           valueFrom:
-            secretKeyRef:
-              name: analytics-secrets
-              key: AWS_SECRET_ACCESS_KEY
-         - name: AWS_SESSION_TOKEN
-           valueFrom:
-            secretKeyRef:
-              name: analytics-secrets
-              key: AWS_SESSION_TOKEN
         resources:
           requests:
             cpu: "100m"
