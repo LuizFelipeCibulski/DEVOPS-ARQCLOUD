@@ -19,7 +19,7 @@ spec:
       # substitui AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN.
       serviceAccountName: analytics-service
       containers:
-      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/analytics-service:v1.0.0-046d7eb
+      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/analytics-service:v1.0.0-fe62923
         name: analytics-service
         env:
          - name: PORT
