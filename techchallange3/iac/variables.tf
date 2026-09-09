@@ -28,7 +28,7 @@ variable "is_academy" {
             e habilita o provider OIDC para IRSA.
   EOT
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "lab_role_name" {
@@ -192,4 +192,53 @@ variable "dynamodb_table_name" {
 variable "sqs_queue_name" {
   type    = string
   default = "evaluation"
+}
+# ---------------------------------------------------------------------
+# GitHub Actions OIDC - origem do secret AWS_ROLE_TO_ASSUME
+# ---------------------------------------------------------------------
+
+variable "enable_github_oidc" {
+  description = <<-EOT
+    true = cria a IAM role que o GitHub Actions assume via OIDC para
+           publicar no ECR. Exige github_repository preenchido e
+           is_academy = false (Academy nao permite criar IAM role).
+    false = nao cria nada; o pipeline tem que usar as chaves temporarias
+           do Learner Lab (secrets AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "github_repository" {
+  description = "Repositorio autorizado a assumir a role, formato dono/repositorio (obrigatorio quando enable_github_oidc = true)"
+  type        = string
+  default     = ""
+}
+
+variable "github_oidc_role_name" {
+  description = <<-EOT
+    Nome da IAM role. null = "<project_name>-github-actions". Se voce ja
+    criou a role a mao antes de trazer isso pro Terraform, coloque o nome
+    dela aqui e rode o `tofu import` (ver README) - senao o apply cria
+    uma segunda role fazendo a mesma coisa.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "github_oidc_allowed_branches" {
+  description = "Branches que podem assumir a role - os workflows so publicam no ECR em push na main"
+  type        = list(string)
+  default     = ["main"]
+}
+
+variable "create_github_oidc_provider" {
+  description = <<-EOT
+    O provider OIDC do GitHub e unico por conta AWS. Deixe true na
+    primeira vez; mude para false se a conta ja tiver o
+    token.actions.githubusercontent.com registrado (por outro stack ou
+    criado a mao), senao o apply falha com EntityAlreadyExists.
+  EOT
+  type        = bool
+  default     = true
 }

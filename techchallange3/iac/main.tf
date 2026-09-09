@@ -36,6 +36,27 @@ module "ecr" {
   tags             = local.common_tags
 }
 
+# ---------------------------------------------------------------------
+# Role do GitHub Actions (OIDC) - o ARN dela e o secret
+# AWS_ROLE_TO_ASSUME usado pelos workflows dos microsservicos.
+# Desligada em Academy porque la nao se cria IAM role.
+# ---------------------------------------------------------------------
+module "github_oidc" {
+  count  = var.enable_github_oidc && !var.is_academy ? 1 : 0
+  source = "./modules/github-oidc"
+
+  project_name         = var.project_name
+  github_repository    = var.github_repository
+  role_name            = var.github_oidc_role_name
+  allowed_branches     = var.github_oidc_allowed_branches
+  create_oidc_provider = var.create_github_oidc_provider
+
+  # Permissao minima: push apenas nos repos ECR deste projeto.
+  ecr_repository_arns = values(module.ecr.repository_arns)
+
+  tags = local.common_tags
+}
+
 module "eks" {
   count  = var.manage_eks_cluster ? 1 : 0
   source = "./modules/eks"

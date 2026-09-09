@@ -22,11 +22,11 @@ terraform {
   # ovo") e descomente o bloco abaixo:
   #
   backend "s3" {
-     bucket         = "togglemaster-tfstate-tibursio"
-     key            = "tech-challenge-fase3/terraform.tfstate"
-     region         = "us-east-1"
-     dynamodb_table = "togglemaster-tfstate-lock-tibursio"
-     encrypt        = true
+    bucket         = "togglemaster-tfstate-tib"
+    key            = "tech-challenge-fase3/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "togglemaster-tfstate-lock-tib"
+    encrypt        = true
   }
 }
 

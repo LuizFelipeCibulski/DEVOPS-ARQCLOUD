@@ -16,8 +16,8 @@
 set -euo pipefail
 
 # ---- AJUSTE AQUI ----
-BUCKET_NAME="togglemaster-tfstate-tibursio"          # precisa ser globalmente único no S3
-DYNAMODB_TABLE="togglemaster-tfstate-lock-tibursio"
+BUCKET_NAME="togglemaster-tfstate-tib"          # precisa ser globalmente único no S3
+DYNAMODB_TABLE="togglemaster-tfstate-lock-tib"
 AWS_REGION="us-east-1"
 # ----------------------
 

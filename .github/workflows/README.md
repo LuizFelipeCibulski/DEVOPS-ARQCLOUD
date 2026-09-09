@@ -399,6 +399,22 @@ Em **Settings → Secrets and variables → Actions**:
 | `AWS_SESSION_TOKEN` | secret | terraform.yml | modo Academy |
 | `AWS_MODE` | **variable** | terraform.yml | `academy` ou `normal` |
 
+**De onde vem o `AWS_ROLE_TO_ASSUME`?** Não é um segredo de verdade — é o ARN de
+uma IAM Role, e o que protege é a *trust policy* dela (restrita a
+`repo:<dono>/<repo>:ref:refs/heads/main`). Essa role é criada pelo módulo
+`techchallange3/iac/modules/github-oidc`; ligue com `enable_github_oidc = true` +
+`github_repository` no `terraform.tfvars` e o output entrega o valor pronto:
+
+```bash
+cd techchallange3/iac
+eval "$(tofu output -raw github_actions_secret_command)"   # gh secret set AWS_ROLE_TO_ASSUME ...
+```
+
+Detalhes (incluindo como importar uma role já criada a mão) em
+[`techchallange3/iac/README.md`](../../techchallange3/iac/README.md#cicd-a-role-do-github-actions-aws_role_to_assume).
+No modo Academy isso não existe: lá são as 3 chaves temporárias do Learner Lab,
+renovadas com `techchallange3/update-secrets-aws.sh`.
+
 Além disso: os repositórios ECR precisam existir com os nomes de
 `ECR_REPOSITORY` (o módulo `iac/modules/ecr` já cria os 5 a partir da variável
 `microservices`).

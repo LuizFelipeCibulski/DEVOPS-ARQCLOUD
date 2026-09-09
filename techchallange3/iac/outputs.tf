@@ -56,3 +56,20 @@ output "sqs_queue_arn" {
 output "sqs_dlq_url" {
   value = module.sqs.dlq_url
 }
+
+# ---------------------------------------------------------------------
+# CI/CD - valor do secret AWS_ROLE_TO_ASSUME
+# ---------------------------------------------------------------------
+
+output "github_actions_role_arn" {
+  description = "ARN da role do GitHub Actions - cadastrar como secret AWS_ROLE_TO_ASSUME (null quando enable_github_oidc = false)"
+  value       = var.enable_github_oidc && !var.is_academy ? module.github_oidc[0].role_arn : null
+}
+
+output "github_actions_secret_command" {
+  description = "Rode isso depois do apply para cadastrar o secret no repositorio (requer a GitHub CLI autenticada)"
+  value = (var.enable_github_oidc && !var.is_academy
+    ? "gh secret set AWS_ROLE_TO_ASSUME --body '${module.github_oidc[0].role_arn}'"
+    : "OIDC desligado (enable_github_oidc = false ou modo Academy) - use ../update-secrets-aws.sh com as chaves temporarias do Learner Lab."
+  )
+}

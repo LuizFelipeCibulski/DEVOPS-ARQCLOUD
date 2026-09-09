@@ -16,8 +16,6 @@ on:
     paths:
       - 'techchallange3/docker/analytics-service/**'
       - '.github/workflows/analytics-service.yml'
-  paths-ignore:
-    - 'techchallange3/kubernetes/analytics-service/**' 
 
 permissions:
   id-token: write
@@ -151,8 +149,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: security-scan
     permissions:
-      id-token: write
-      contents: read
+      id-token: write   # OIDC: troca o token do GitHub por credencial AWS
+      contents: write   # o step de atualizar a tag commita de volta na main
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
@@ -184,21 +182,21 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
-      #- name: Configurar credenciais AWS (OIDC)
-      #  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      #  uses: aws-actions/configure-aws-credentials@v4
-      #  with:
-      #    role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-      #    aws-region: ${{ env.AWS_REGION }}
-
-      - name: Configurar credenciais AWS (Academy - Access Keys temporárias)
+      - name: Configurar credenciais AWS (OIDC)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
+
+      #- name: Configurar credenciais AWS (Academy - Access Keys temporárias)
+      #  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      #  uses: aws-actions/configure-aws-credentials@v4
+      #  with:
+      #    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #    aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+      #    aws-region: ${{ env.AWS_REGION }}
 
       - name: Login no Amazon ECR
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -214,11 +212,12 @@ jobs:
           echo "Imagem publicada em: $IMAGE_URI"
     
       - name: Atualizar tag no Deployment YAML
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: fjogeleit/yaml-update-action@v0.15.0
         with:
           valueFile: 'techchallange3/kubernetes/analytics-service/deployment.yaml'
           propertyPath: 'spec.template.spec.containers[0].image'
-          value: '${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}
+          value: '${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}'
           branch: main
           commitChange: true
           message: 'chore: update image tag to ${{ steps.vars.outputs.IMAGE_TAG }}'

@@ -14,6 +14,7 @@ Academy com `LabRole` e conta AWS normal).
 - [Academy x Console: uma ressalva importante](#academy-x-console-uma-ressalva-importante)
 - [Arquitetura de rede](#arquitetura-de-rede)
 - [Peculiaridades de cada serviço](#peculiaridades-de-cada-serviço)
+- [CI/CD: a role do GitHub Actions (AWS_ROLE_TO_ASSUME)](#cicd-a-role-do-github-actions-aws_role_to_assume)
 - [Como os serviços se comunicam](#como-os-serviços-se-comunicam)
 - [Depois do apply: conectando com o Kubernetes](#depois-do-apply-conectando-com-o-kubernetes)
 - [Custos e limpeza](#custos-e-limpeza)
@@ -34,7 +35,8 @@ iac/
     ├── rds/            # 3 instâncias Postgres independentes
     ├── elasticache/    # Redis (Serverless por padrão)
     ├── dynamodb/       # tabela de eventos de analytics
-    └── sqs/            # fila + DLQ
+    ├── sqs/            # fila + DLQ
+    └── github-oidc/    # role assumida pelo GitHub Actions (AWS_ROLE_TO_ASSUME)
 ```
 
 ## Pré-requisitos
@@ -82,6 +84,7 @@ por `var.is_academy`:
 | IRSA (IAM Roles for Service Accounts) | Desligado — Academy não permite criar as roles que o IRSA exige | Provider OIDC do cluster é criado (`enable_irsa = true`), liberando IRSA para o Ingress Controller, KEDA etc. |
 | KEDA / Karpenter | Não funcionam (dependem de IRSA) — use o HPA por CPU (requisito mínimo do desafio) | Pode usar KEDA para o `analytics-service` escalar direto pela profundidade da fila SQS |
 | Node group | `capacity_type = ON_DEMAND` (Spot é mais chato de garantir em Academy) | Pode trocar para `SPOT` em `node_capacity_type` para economizar |
+| CI/CD → AWS | Chaves temporárias do Learner Lab nos secrets, renovadas com `../update-secrets-aws.sh` a cada expiração | Módulo `github-oidc` cria a role do `AWS_ROLE_TO_ASSUME` — credencial temporária, nada de chave fixa no repositório |
 
 ## Academy x Console: uma ressalva importante
 
@@ -266,6 +269,124 @@ Pontos-chave:
   analytics-service sobe (processando mais mensagens) e o HPA reage a
   isso — é literalmente o "workaround" que o PDF descreve para
   escalonar via fila usando só HPA por CPU (sem precisar de KEDA).
+
+## CI/CD: a role do GitHub Actions (`AWS_ROLE_TO_ASSUME`)
+
+Os workflows dos microsserviços (`.github/workflows/*-service.yml`) publicam
+a imagem no ECR e para isso precisam de credencial AWS. Em vez de guardar um
+`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` de longa duração nos secrets do
+repositório, o pipeline usa **OIDC**: o GitHub apresenta um token JWT assinado,
+a AWS valida a assinatura e devolve uma credencial temporária.
+
+```yaml
+      - name: Configurar credenciais AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+```
+
+O secret `AWS_ROLE_TO_ASSUME` guarda **só o ARN da role** — não é um segredo de
+verdade, é um identificador público. Quem manda na segurança é a *trust policy*
+da role, e é ela que o módulo `modules/github-oidc` cria.
+
+### O que o módulo cria
+
+| Recurso | Papel |
+|---|---|
+| `aws_iam_openid_connect_provider` | Registra `token.actions.githubusercontent.com` como emissor confiável. **É um recurso por conta AWS, não por projeto** — daí a flag `create_github_oidc_provider` |
+| `aws_iam_role` | A role em si; o ARN dela é o valor do secret |
+| `aws_iam_role_policy` (inline `ecr-push`) | Permissão mínima: `GetAuthorizationToken` + push/pull **apenas nos ARNs dos repositórios ECR deste projeto** |
+
+A condição que importa na trust policy é o claim `sub`:
+
+```
+repo:LuizFelipeCibulski/DEVOPS-ARQCLOUD:ref:refs/heads/main
+```
+
+Isso é o que impede qualquer outro repositório do GitHub de assumir a sua role.
+Note que o `ref:refs/heads/main` também casa com o `if: github.ref ==
+'refs/heads/main'` dos workflows: **um PR de terceiros não consegue credencial**,
+nem que alguém remova o `if` do YAML. É defesa em duas camadas.
+
+Por isso `allowed_branches` tem default `["main"]` — trocar por `*` no `sub`
+anula toda a proteção.
+
+### Como habilitar
+
+Em `terraform.tfvars`:
+
+```hcl
+is_academy         = false
+enable_github_oidc = true
+github_repository  = "LuizFelipeCibulski/DEVOPS-ARQCLOUD"
+
+# O provider OIDC do GitHub é único por conta. Confira antes:
+#   aws iam list-open-id-connect-providers
+# Se o token.actions.githubusercontent.com já aparecer, deixe false —
+# senão o apply falha com EntityAlreadyExists.
+create_github_oidc_provider = false
+```
+
+Depois do apply, os outputs entregam o valor pronto:
+
+```bash
+tofu output -raw github_actions_role_arn
+# arn:aws:iam::628409561285:role/togglemaster-github-actions
+
+# ou já no formato do comando que cadastra o secret:
+eval "$(tofu output -raw github_actions_secret_command)"
+```
+
+O módulo é desligado automaticamente em Academy (`count = var.enable_github_oidc
+&& !var.is_academy`), então deixar `enable_github_oidc = true` no tfvars não
+quebra um apply em modo Academy — ele simplesmente não cria a role.
+
+### Adotando uma role que já existe (`import`)
+
+Se você criou a role a mão antes de trazer isso pro Terraform, **não deixe o
+apply criar uma segunda**. Aponte o nome e importe:
+
+```hcl
+enable_github_oidc          = true
+github_repository           = "LuizFelipeCibulski/DEVOPS-ARQCLOUD"
+create_github_oidc_provider = false
+github_oidc_role_name       = "github-actions-ecr-push"
+```
+
+```bash
+# a role (o ID do import é o nome, não o ARN)
+tofu import 'module.github_oidc[0].aws_iam_role.github_actions' github-actions-ecr-push
+
+# o provider OIDC, se você também o criou a mão e quiser gerenciá-lo aqui
+# (nesse caso mude create_github_oidc_provider para true antes):
+tofu import 'module.github_oidc[0].aws_iam_openid_connect_provider.github[0]' \
+  arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com
+
+tofu plan   # confira o que o Terraform quer ajustar antes de aplicar
+```
+
+**Atenção com política gerenciada anexada a mão.** Se a role foi criada com
+`AmazonEC2ContainerRegistryPowerUser` (que dá push em *todos* os repositórios
+ECR da conta), o Terraform **não vai remover** — não existe recurso
+`aws_iam_role_policy_attachment` no módulo, e o que o Terraform não declara ele
+ignora. O import adiciona a policy inline `ecr-push` (restrita) *ao lado* da
+gerenciada, e as duas somam. Para ficar de fato com permissão mínima, desanexe:
+
+```bash
+aws iam detach-role-policy --role-name github-actions-ecr-push \
+  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+```
+
+### O ovo e a galinha
+
+A role sai do `apply`, mas quem roda o `apply` também precisa de credencial. Na
+primeira vez isso é resolvido a mão (credencial local do `aws configure`, como o
+`bootstrap-backend.sh` já faz com o bucket de state). A partir daí:
+
+- **microsserviços** → `AWS_ROLE_TO_ASSUME`, criada por este módulo;
+- **`terraform.yml`** → `AWS_TERRAFORM_ROLE_ARN`, que **não** é criada aqui de
+  propósito: uma role com permissão de criar VPC/EKS/RDS é justamente a que não
+  deveria depender de si mesma para existir.
 
 ## Como os serviços se comunicam
 

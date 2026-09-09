@@ -17,6 +17,25 @@ manage_eks_cluster = true # false = so a VPC; voce cria o EKS pelo Console
 # is_academy         = false
 # manage_eks_cluster = true
 
+# ------------------------------------------------------------------
+# CI/CD - role assumida pelo GitHub Actions via OIDC.
+# O ARN dela e o valor do secret AWS_ROLE_TO_ASSUME que os workflows
+# dos microsservicos usam para publicar no ECR. So funciona em conta
+# normal (is_academy = false); em Academy use ../update-secrets-aws.sh.
+# ------------------------------------------------------------------
+# enable_github_oidc = true
+# github_repository  = "LuizFelipeCibulski/DEVOPS-ARQCLOUD"
+#
+# O provider OIDC do GitHub e unico por conta AWS - se
+# `aws iam list-open-id-connect-providers` ja mostrar o
+# token.actions.githubusercontent.com, deixe false ou o apply falha
+# com EntityAlreadyExists.
+# create_github_oidc_provider = false
+#
+# Se a role ja existe (criada a mao), coloque o nome dela aqui e rode o
+# `tofu import` do README em vez de deixar o Terraform criar outra.
+# github_oidc_role_name = "github-actions-ecr-push"
+
 azs                      = ["us-east-1a", "us-east-1b"]
 vpc_cidr                 = "10.0.0.0/16"
 public_subnet_cidrs      = ["10.0.0.0/24", "10.0.1.0/24"]
