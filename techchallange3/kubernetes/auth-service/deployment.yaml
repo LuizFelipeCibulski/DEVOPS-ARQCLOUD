@@ -16,7 +16,7 @@ spec:
         app: auth-service
     spec:
       containers:
-      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
+      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/auth-service:v1.0.0-046d7eb
         name: auth-service
         env:
          - name: DATABASE_URL
