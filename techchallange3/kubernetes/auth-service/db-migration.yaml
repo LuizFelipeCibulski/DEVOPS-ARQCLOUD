@@ -1,0 +1,84 @@
+# =====================================================================
+# Migração de schema do auth-service
+# ---------------------------------------------------------------------
+# Por que isto existe: o Terraform cria a instância RDS e o banco, mas
+# não cria tabela nenhuma. O schema estava só em
+# docker/auth-service/db/init.sql, documentado no README como um
+# `psql -f` manual — que nunca foi executado contra o RDS. O sintoma foi
+# o auth-service respondendo 500 em POST /admin/keys com
+# 'relation "api_keys" does not exist', o que travava o Job de
+# bootstrap e, em cascata, o evaluation-service.
+#
+# O SQL abaixo espelha docker/auth-service/db/init.sql, com duas
+# adaptações obrigatórias para RDS:
+#   - sem CREATE DATABASE: o banco já vem do Terraform, e o comando
+#     falharia com "already exists"
+#   - sem \c (meta-comando do psql): a DATABASE_URL já aponta para o
+#     banco certo
+#
+# Mantenha os dois arquivos em sincronia ao mudar o schema.
+# =====================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-schema
+  namespace: auth-service
+data:
+  schema.sql: |
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        
+        -- key_hash armazena o hash SHA-256 da chave, que tem 64 caracteres hexadecimais
+        key_hash VARCHAR(64) NOT NULL UNIQUE, 
+        
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-service-migrate
+  namespace: auth-service
+  annotations:
+    # Hook de Sync (não PreSync): precisa rodar DEPOIS que o
+    # ExternalSecret materializou o Secret com a DATABASE_URL, e ANTES
+    # do Deployment. Um PreSync rodaria antes do Secret existir e
+    # travaria toda instalação nova.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: public.ecr.aws/docker/library/postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: auth-secrets
+                  key: DATABASE_URL
+          args:
+            - |
+              set -eu
+              echo "Aplicando schema em auth-service..."
+              # ON_ERROR_STOP faz o psql sair != 0 no primeiro erro; sem
+              # isso o Job passaria verde com o schema pela metade.
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /schema/schema.sql
+              echo "Schema aplicado."
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "256Mi" }
+      volumes:
+        - name: schema
+          configMap:
+            name: auth-service-schema

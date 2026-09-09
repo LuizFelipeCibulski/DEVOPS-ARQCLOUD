@@ -15,6 +15,16 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: evaluation-service
+  ignoreDifferences:
+    # O HPA (e no analytics também o KEDA) é o dono do número de réplicas.
+    # O git diz `replicas: 1`; o KEDA escala para 0 quando a fila esvazia.
+    # Sem esta exceção o Argo CD marca OutOfSync, o selfHeal devolve para 1,
+    # o KEDA zera de novo - um cabo de guerra que nunca converge e ainda
+    # anula o scale-to-zero.
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
   syncPolicy:
     automated:
       prune: true      # apagar um manifesto do git apaga o recurso no cluster

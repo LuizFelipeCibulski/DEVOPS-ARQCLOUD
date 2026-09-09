@@ -1,6 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    # Onda 2: só sobe depois do Job de migração (onda 1), que por sua vez
+    # espera o ExternalSecret (onda 0) materializar a DATABASE_URL.
+    argocd.argoproj.io/sync-wave: "2"
   labels:
     app: flag-service
   name: flag-service

@@ -34,7 +34,11 @@ spec:
   # O Job é idempotente (checa o cofre antes de cunhar), então repetir é
   # inofensivo. O limite existe só para não girar para sempre se o
   # auth-service estiver quebrado de verdade.
-  backoffLimit: 5
+  # Era 5. Com 6 tentativas de 5 minutos, um auth-service quebrado
+  # segurava a sync por meia hora - e enquanto uma operação está em
+  # andamento o Argo CD NÃO pega a revisão nova que corrige o problema.
+  # Falhar rápido devolve o controle ao loop de retry da Application.
+  backoffLimit: 2
   template:
     metadata:
       labels:
@@ -79,29 +83,47 @@ spec:
               # ---- 2. Espera o auth-service atender -------------------
               echo "Aguardando o auth-service responder em $AUTH_URL/health ..."
               pronto=nao
-              for i in $(seq 1 60); do
+              for i in $(seq 1 24); do   # 24 x 5s = 2 min
                 if curl -sf --max-time 5 "$AUTH_URL/health" >/dev/null 2>&1; then
                   pronto=sim; break
                 fi
                 sleep 5
               done
               if [ "$pronto" != "sim" ]; then
-                echo "ERRO: auth-service não respondeu em 5 minutos." >&2
+                echo "ERRO: auth-service não respondeu em 2 minutos." >&2
                 exit 1
               fi
               echo "auth-service no ar."
 
               # ---- 3. Cunha a chave -----------------------------------
-              resposta=$(curl -sf --max-time 15 -X POST "$AUTH_URL/admin/keys" \
-                           -H "Authorization: Bearer $MASTER_KEY" \
-                           -H "Content-Type: application/json" \
-                           -d '{"name":"evaluation-service"}')
+              # -f (fail) faz o curl sair != 0 em erro HTTP, e com
+              # `set -e` o script morria SEM IMPRIMIR NADA - foi
+              # exatamente o que aconteceu quando o auth respondeu 500 por
+              # falta da tabela api_keys. Capturamos o código e o corpo
+              # para o log dizer o que houve.
+              http=$(curl -s --max-time 15 -o /tmp/resp.json -w '%{http_code}' \
+                       -X POST "$AUTH_URL/admin/keys" \
+                       -H "Authorization: Bearer $MASTER_KEY" \
+                       -H "Content-Type: application/json" \
+                       -d '{"name":"evaluation-service"}') || true
 
-              chave=$(echo "$resposta" | jq -r '.key // empty')
+              if [ "$http" != "201" ] && [ "$http" != "200" ]; then
+                echo "ERRO: POST /admin/keys respondeu HTTP $http" >&2
+                # O corpo de uma resposta de erro não contém chave nenhuma,
+                # então é seguro (e útil) mostrá-lo.
+                head -c 500 /tmp/resp.json >&2; echo >&2
+                case "$http" in
+                  403) echo "  -> MASTER_KEY divergente entre o Secret e o processo do auth-service." >&2 ;;
+                  500) echo "  -> Erro interno do auth-service. Veja se o Job de migração criou a tabela api_keys:" >&2
+                       echo "     kubectl logs -n auth-service job/auth-service-migrate" >&2 ;;
+                esac
+                exit 1
+              fi
+
+              chave=$(jq -r '.key // empty' /tmp/resp.json)
               if [ -z "$chave" ]; then
-                # Não imprime a resposta inteira: ela contém a chave em
-                # texto plano quando o parse falha por outro motivo.
-                echo "ERRO: o auth-service não devolveu o campo .key" >&2
+                # Não imprime o corpo aqui: num 201 ele contém a chave.
+                echo "ERRO: resposta 201 sem o campo .key" >&2
                 exit 1
               fi
               echo "Chave cunhada (prefixo ${chave:0:12}...)."

@@ -37,8 +37,8 @@ output "redis_endpoint" {
 }
 
 output "redis_url" {
-  description = "REDIS_URL pronta para o evaluation-service"
-  value       = "redis://${module.elasticache.endpoint}:${module.elasticache.port}"
+  description = "REDIS_URL pronta para o evaluation-service (rediss:// quando serverless - TLS obrigatorio)"
+  value       = "${module.elasticache.url_scheme}://${module.elasticache.endpoint}:${module.elasticache.port}"
 }
 
 output "dynamodb_table_name" {

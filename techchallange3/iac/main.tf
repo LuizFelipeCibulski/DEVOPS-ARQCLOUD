@@ -170,7 +170,7 @@ module "app_secrets" {
 
   name_prefix   = local.secrets_prefix
   database_urls = module.rds.database_urls
-  redis_url     = "redis://${module.elasticache.endpoint}:${module.elasticache.port}"
+  redis_url     = "${module.elasticache.url_scheme}://${module.elasticache.endpoint}:${module.elasticache.port}"
   tags          = local.common_tags
 }
 
