@@ -1,7 +1,10 @@
 # ToggleMaster — o fluxo completo, do push ao pod rodando
 
-Documento único de referência: o que acontece quando você dá `git push`, quem
-cria o quê, por que cada decisão foi tomada, e como depurar quando trava.
+Passo a passo operacional: o que acontece quando você dá `git push`, o bootstrap,
+a operação do dia a dia e como depurar quando trava.
+
+> Para a visão de arquitetura — o que existe, como está ligado e por quê —
+> comece por [`ARQUITETURA.md`](ARQUITETURA.md).
 
 - [1. Visão geral em 60 segundos](#1-visão-geral-em-60-segundos)
 - [2. As duas esteiras](#2-as-duas-esteiras)
@@ -226,6 +229,15 @@ variável de ambiente no container
 | `togglemaster/prod/evaluation-service` | `REDIS_URL` | Terraform | `evaluation-secrets` |
 | `togglemaster/prod/service-api-key` | `SERVICE_API_KEY` | **Job de bootstrap** | `evaluation-secrets` |
 
+### Schema dos bancos
+
+O Terraform cria a instância RDS e o banco, mas **não cria tabela**. Cada serviço
+com Postgres tem um `db-migration.yaml` (ConfigMap com o schema + Job que roda
+`psql`), na onda 1, antes do Deployment (onda 2).
+
+É hook de `Sync` e não `PreSync`: precisa rodar depois do `ExternalSecret`
+materializar a `DATABASE_URL`. Um `PreSync` travaria toda instalação nova.
+
 O `analytics-service` não tem `ExternalSecret` nenhum: ele não precisa de
 segredo. Tudo que ele consome — URL da fila, nome da tabela — é identificador
 público e mora no ConfigMap; e o acesso à AWS é via IRSA.
@@ -416,6 +428,12 @@ depois apague a `SERVICE_API_KEY` do cofre e deixe o Job cunhar outra.
 | Job `auth-bootstrap` falhando | auth-service não respondeu em 5 min, ou `MASTER_KEY` divergente |
 | Pipeline falha antes da AWS | é o gate do Trivy (`exit-code: 1` em HIGH/CRITICAL), não o OIDC |
 | `tofu init` reclama do lock | alguém rodou `terraform` no lugar de `tofu` |
+| Pod em `CrashLoopBackOff` com `i/o timeout` no Redis | falta o TLS: ElastiCache Serverless só aceita `rediss://` |
+| `relation "..." does not exist` | o Job de migração não rodou: `kubectl logs -n <ns> job/<svc>-migrate` |
+| apply do Terraform dá `Not authorized to ... AssumeRoleWithWebIdentity` mas o plan passa | o job tem `environment:`, que muda o claim `sub` do token OIDC |
+| Application presa em `Running`, ignorando commits novos | hook travado: enquanto há operação em andamento o Argo CD não pega revisão nova |
+| Job não some com `kubectl delete` | finalizer `argocd.argoproj.io/hook-finalizer` — remova com `kubectl patch ... --type json -p '[{"op":"remove","path":"/metadata/finalizers"}]'` |
+| Deployment fica alternando entre 0 e 1 réplica | falta `ignoreDifferences` em `/spec/replicas`: Argo CD brigando com HPA/KEDA |
 
 Comandos que respondem rápido:
 
@@ -452,6 +470,16 @@ o próximo `apply` falha até a janela vencer.
 restringir o CIDR expõe a API do cluster à internet inteira. O bloco emite um
 **aviso** em todo plan (não bloqueia) — visível o suficiente para não passar
 despercebido, sem travar o pipeline.
+
+**`environment: production` e o claim OIDC.** Um job que declara `environment:`
+recebe o `sub` como `repo:<owner>/<repo>:environment:<nome>`, e não o formato de
+branch. Por isso a role do Terraform tem trust policy própria, aceitando os dois.
+Adicionar um environment novo (staging, por exemplo) exige incluí-lo em
+`terraform_environments`.
+
+**`rediss://` para o ElastiCache Serverless.** TLS não é opcional ali. Com
+`redis://` o TCP conecta e o cliente morre por timeout de leitura — nunca por
+"conexão recusada", o que torna o diagnóstico bem menos óbvio.
 
 **KEDA migrado para o Argo CD.** Estava instalado por `helm install` e
 `eksctl create iamserviceaccount`, ambos fora de qualquer versionamento. Agora
