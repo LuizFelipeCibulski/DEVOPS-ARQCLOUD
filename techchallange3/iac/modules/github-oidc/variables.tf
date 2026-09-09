@@ -125,3 +125,14 @@ variable "tfstate_lock_table" {
   type        = string
   default     = ""
 }
+
+variable "terraform_environments" {
+  description = <<-EOT
+    GitHub Environments cujos jobs podem assumir a role do Terraform.
+    Um job com `environment: X` recebe o claim sub no formato
+    "repo:<owner>/<repo>:environment:X" em vez do formato de branch - sem
+    listar aqui, o job de apply nao autentica.
+  EOT
+  type        = list(string)
+  default     = ["production"]
+}

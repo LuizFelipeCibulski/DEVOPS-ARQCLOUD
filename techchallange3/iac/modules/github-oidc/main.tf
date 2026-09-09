@@ -140,12 +140,57 @@ locals {
   terraform_role_name = coalesce(var.terraform_role_name, "${var.project_name}-github-terraform")
 }
 
+# ATENCAO - a pegadinha que quebrou o primeiro apply do pipeline:
+#
+# Quando um job declara `environment: production` (que e o que liga o
+# gate de aprovacao manual), o GitHub MUDA o claim `sub` do token OIDC.
+# Ele deixa de ser
+#     repo:<owner>/<repo>:ref:refs/heads/main
+# e passa a ser
+#     repo:<owner>/<repo>:environment:production
+#
+# Por isso o job `plan` (sem environment) autenticava e o `apply` morria
+# com "Not authorized to perform sts:AssumeRoleWithWebIdentity" - a
+# trust policy so conhecia o formato de branch.
+#
+# A role do ECR NAO ganha esses subjects: os jobs dela nao usam
+# environment, e ampliar a confianca dela sem necessidade seria piorar
+# o escopo de graca.
+data "aws_iam_policy_document" "assume_role_terraform" {
+  count = var.create_terraform_role ? 1 : 0
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "${local.oidc_host}:sub"
+      values = concat(
+        local.allowed_subjects,
+        [for env in var.terraform_environments : "repo:${var.github_repository}:environment:${env}"],
+      )
+    }
+  }
+}
+
 resource "aws_iam_role" "terraform" {
   count = var.create_terraform_role ? 1 : 0
 
   name                 = local.terraform_role_name
   description          = "Assumida pelo workflow terraform.yml de ${var.github_repository}"
-  assume_role_policy   = data.aws_iam_policy_document.assume_role.json
+  assume_role_policy   = data.aws_iam_policy_document.assume_role_terraform[0].json
   max_session_duration = 3600
 
   tags = merge(var.tags, {
