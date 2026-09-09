@@ -20,7 +20,7 @@ spec:
         app: targeting-service
     spec:
       containers:
-      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/targeting-service:v1.0.0-046d7eb
+      - image: 628409561285.dkr.ecr.us-east-1.amazonaws.com/targeting-service:v1.0.0-fe62923
         name: targeting-service
         env:
          - name: DATABASE_URL
