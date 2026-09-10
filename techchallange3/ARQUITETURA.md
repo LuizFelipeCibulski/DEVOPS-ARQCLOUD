@@ -87,7 +87,7 @@ dita a ordem de partida do sistema (seção 9).
 
 ## 3. Infraestrutura AWS
 
-Tudo em `us-east-1`, conta `628409561285`, criado por OpenTofu em
+Tudo em `us-east-1`, criado por OpenTofu em
 `techchallange3/iac/`.
 
 | Módulo | Recurso | Detalhe que importa |
