@@ -5,4 +5,4 @@ boto3==1.43.89
 Werkzeug==3.1.6
 jaraco.context>=6.1.0
 msgpack>=1.2.1
-urllib3>=2.7.0
+urllib3>=2.6.0
