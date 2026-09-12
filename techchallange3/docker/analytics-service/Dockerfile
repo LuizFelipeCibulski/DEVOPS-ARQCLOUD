@@ -5,7 +5,7 @@ FROM python:3.11-alpine AS builder
 
 # Atualiza pacotes do SO no builder também (evita libs de sistema desatualizadas
 # sendo usadas na compilação de wheels)
-RUN apk upgrade --no-cache
+#RUN apk upgrade --no-cache
 
 WORKDIR /app
 
