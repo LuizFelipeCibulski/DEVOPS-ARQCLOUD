@@ -18,7 +18,9 @@ COPY requirements.txt .
 # --force-reinstall garante que as versões pinadas realmente substituam
 # as que já vêm na imagem base (evita CVEs "fantasmas" de versões antigas
 # sobrevivendo no build final)
-RUN python -m pip install --no-cache-dir --no-compile --prefer-binary -r requirements.txt
+#RUN python -m pip install --no-cache-dir --no-compile --prefer-binary -r requirements.txt
+
+RUN pip install -r requirements.txt
 
 COPY app.py .
 
