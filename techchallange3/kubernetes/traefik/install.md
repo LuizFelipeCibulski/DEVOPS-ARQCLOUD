@@ -3,4 +3,5 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/re
 helm repo add traefik https://traefik.github.io/charts
 helm repo update
 # Install
+kubectl create ns traefik
 helm install traefik traefik/traefik -n traefik -f values.yaml --wait

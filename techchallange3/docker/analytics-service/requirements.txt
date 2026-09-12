@@ -1,5 +1,5 @@
-Flask==3.1.3
-gunicorn==22.0.0
+Flask==3.1.2
+gunicorn==21.0.0
 python-dotenv==1.2.2
 boto3==1.43.89
 Werkzeug==3.1.4
