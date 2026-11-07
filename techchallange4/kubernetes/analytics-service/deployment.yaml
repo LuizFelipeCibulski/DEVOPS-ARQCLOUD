@@ -19,7 +19,7 @@ spec:
       # substitui AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN.
       serviceAccountName: analytics-service
       containers:
-      - image: 198518420325.dkr.ecr.us-east-1.amazonaws.com/analytics-service:v1.0.0-526de79
+      - image: 198518420325.dkr.ecr.us-east-1.amazonaws.com/analytics-service:v1.0.0-5553227
         name: analytics-service
         # Fase 4: variaveis OTEL_* (ver otel-configmap.yaml)
         envFrom:
