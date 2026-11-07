@@ -140,7 +140,7 @@ spec:
     spec:
       serviceAccountName: self-healer
       containers:
-      - image: 198518420325.dkr.ecr.us-east-1.amazonaws.com/self-healer:v1.0.0-bootstrap
+      - image: 198518420325.dkr.ecr.us-east-1.amazonaws.com/self-healer:v1.0.0-5553227
         name: self-healer
         ports:
           - containerPort: 8080
