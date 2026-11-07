@@ -4,6 +4,13 @@ Documento técnico **e** tutorial. A primeira metade explica *o que foi feito e
 por quê* (embasamento para o vídeo e o relatório). A segunda é um passo a passo
 para **replicar em qualquer cluster**.
 
+> 📘 **Para aprender passo a passo** (ordem de execução, depuração dos problemas
+> reais, exercícios): [`TUTORIAL.md`](TUTORIAL.md).
+>
+> ✅ **Validado no cluster em 07/11/2026:** falha injetada → Pending em 48 s →
+> Firing + PagerDuty + Discord + self-healer em 1m44s → pod novo em 1m59s →
+> alerta Normal em **4m18s**, sem intervenção humana.
+
 > Base: a fase 3 (`techchallange3/`) foi copiada para `techchallange4/` e
 > evoluída. Arquitetura geral, secrets, GitOps e ondas continuam valendo, e
 > estão em [`ARQUITETURA.md`](ARQUITETURA.md). Aqui está só o que a fase 4 muda.
