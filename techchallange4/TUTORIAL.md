@@ -37,7 +37,7 @@ ser avisado + 4 h para achar a causa".
 - [Parte 11 — Ligando tudo no GitOps](#parte-11--ligando-tudo-no-gitops)
 - [Parte 12 — CI/CD no modo Academy](#parte-12--cicd-no-modo-academy)
 - [Parte 13 — A execução real, comando a comando](#parte-13--a-execução-real-comando-a-comando)
-- [Parte 14 — Depuração: os 7 problemas reais e como foram achados](#parte-14--depuração-os-7-problemas-reais-e-como-foram-achados)
+- [Parte 14 — Depuração: os 8 problemas reais e como foram achados](#parte-14--depuração-os-8-problemas-reais-e-como-foram-achados)
 - [Parte 15 — Exercícios para fixar](#parte-15--exercícios-para-fixar)
 - [Glossário](#glossário)
 
@@ -785,6 +785,7 @@ kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubuse
 kubectl patch configmap argocd-cmd-params-cm -n argocd --type merge -p '{"data":{"server.rootpath":"/argocd"}}'
 kubectl rollout restart deployment argocd-server -n argocd
 kubectl apply -f techchallange4/kubernetes/argocd/ingressroute.yaml
+kubectl apply -f techchallange4/kubernetes/metrics-server/deploment.yaml   # sem ele o HPA fica "cpu: <unknown>"
 
 # 4. CI/CD
 ./techchallange4/update-secrets-aws.sh
@@ -818,7 +819,7 @@ kubectl logs -n self-healing deploy/self-healer -f      # ver a automação agir
 
 ---
 
-## Parte 14 — Depuração: os 7 problemas reais e como foram achados
+## Parte 14 — Depuração: os 8 problemas reais e como foram achados
 
 O mais valioso para aprender não é a config final, é **o caminho até ela**.
 Em todos os casos o método foi o mesmo: **sintoma → onde olhar → evidência → causa → correção**.
@@ -864,6 +865,12 @@ Em todos os casos o método foi o mesmo: **sintoma → onde olhar → evidência
 - **Evidência:** chave com formato válido (40 caracteres, `NRAL`, sem espaços); Collectors iniciados às 19:52; secret materializado ~20:00.
 - **Causa:** env var é lida **só no boot**, e a chave é `optional`, então o pod subiu com ela vazia.
 - **Correção:** `kubectl rollout restart daemonset/otel-collector-agent` → 0 erros.
+
+### 8. HPA do evaluation "Degraded" no Argo CD
+- **Evidência:** `kubectl get hpa` → `cpu: <unknown>/70%`; `kubectl top nodes` falha.
+- **Causa:** o **metrics-server** foi instalado à mão na fase 3 e não fazia parte do GitOps, então não veio no cluster novo.
+- **Correção:** `kubectl apply -f kubernetes/metrics-server/deploment.yaml` → `cpu: 3%/70%` e as 14 Applications Healthy.
+- **Lição:** tudo que é "instalado uma vez à mão" é dívida. Cluster novo = esquecimento garantido.
 
 ---
 

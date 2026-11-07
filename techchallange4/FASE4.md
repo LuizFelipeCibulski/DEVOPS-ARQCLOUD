@@ -425,6 +425,7 @@ kubectl apply -n argocd --server-side --force-conflicts \
 kubectl patch configmap argocd-cmd-params-cm -n argocd --type merge -p '{"data":{"server.rootpath":"/argocd"}}'
 kubectl rollout restart deployment argocd-server -n argocd
 kubectl apply -f techchallange4/kubernetes/argocd/ingressroute.yaml
+kubectl apply -f techchallange4/kubernetes/metrics-server/deploment.yaml   # HPA precisa
 ```
 
 ### 10.6 GitOps: uma linha sobe tudo
