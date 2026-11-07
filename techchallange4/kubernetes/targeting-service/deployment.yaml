@@ -20,7 +20,7 @@ spec:
         app: targeting-service
     spec:
       containers:
-      - image: 198518420325.dkr.ecr.us-east-1.amazonaws.com/targeting-service:v1.0.0-fe62923
+      - image: 198518420325.dkr.ecr.us-east-1.amazonaws.com/targeting-service:v1.0.0-5553227
         name: targeting-service
         # Fase 4: variaveis OTEL_* (ver otel-configmap.yaml)
         envFrom:
