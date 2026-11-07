@@ -1,0 +1,32 @@
+# Onda -8: configuração versionada da observabilidade (Fase 4).
+#   - ExternalSecret com os tokens (New Relic, PagerDuty, Discord) - tem
+#     que existir ANTES do Grafana e do Collector, que leem no boot;
+#   - dashboard e alertas do Grafana (ConfigMaps lidos pelos sidecars);
+#   - rota /grafana no Traefik.
+# O diretório values/ (vizinho de config/) NÃO é sincronizado aqui: são
+# values de Helm, não manifestos - lição da fase 3 (Object 'Kind' is missing).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+    targetRevision: main
+    path: techchallange4/kubernetes/observability/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 10
+      backoff: {duration: 15s, factor: 2, maxDuration: 3m}

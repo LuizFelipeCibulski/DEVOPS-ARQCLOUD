@@ -1,0 +1,18 @@
+[flake8]
+max-line-length = 120
+extend-exclude = .venv,__pycache__
+
+# O pipeline usa o flake8 como "porta de qualidade", não como formatador.
+# Abaixo só ficam ignorados avisos puramente cosméticos de espaçamento.
+# Nada da família F (pyflakes: import não usado, nome indefinido, variável
+# não usada) nem E9 (erro de sintaxe) é ignorado - esses continuam quebrando o build.
+#
+#   E261 - menos de dois espaços antes de comentário inline
+#   E265 - comentário de bloco sem espaço depois do '#'
+#   E302 - esperava 2 linhas em branco antes da função
+#   E305 - esperava 2 linhas em branco depois de função/classe
+#   E701 - múltiplos statements na mesma linha (ex.: "if not x: return")
+#   W291 - espaço em branco no fim da linha
+#   W292 - arquivo sem newline no final
+#   W293 - linha em branco contendo espaços
+extend-ignore = E261,E265,E302,E305,E701,W291,W292,W293

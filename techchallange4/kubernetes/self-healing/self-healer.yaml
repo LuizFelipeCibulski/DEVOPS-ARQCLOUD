@@ -1,0 +1,183 @@
+# =====================================================================
+# self-healer - Runbook Automation (Fase 4)
+# ---------------------------------------------------------------------
+# Grafana (alerta Firing) --webhook--> self-healer --PATCH--> Deployment
+#
+# O código está em techchallange4/docker/self-healer/app.py. Aqui ficam:
+#   - identidade (ServiceAccount) e PERMISSÕES mínimas (RBAC)
+#   - o Deployment/Service
+#   - o ExternalSecret com o token do webhook e o webhook do Discord
+#
+# Princípio do menor privilégio, em 3 camadas:
+#   1. ClusterRole só com get/list/patch em deployments e get/list em pods
+#      (sem delete, sem create, sem secrets).
+#   2. Ela só vale onde existe RoleBinding: os 5 namespaces das apps.
+#      O self-healer não consegue tocar no argocd, kube-system etc.
+#   3. Allowlist ALLOWED_TARGETS no próprio app: mesmo com RBAC nos 5
+#      namespaces, só os pares namespace/deployment listados são aceitos.
+# =====================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: self-healing
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: self-healer
+  namespace: self-healing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: self-healer-rollout-restart
+rules:
+  # `kubectl rollout restart` = PATCH no template do Deployment
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+  # Para listar os pods antes/depois (evidência no Discord e no log)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healer
+  namespace: auth-service
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: self-healer-rollout-restart}
+subjects: [{kind: ServiceAccount, name: self-healer, namespace: self-healing}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healer
+  namespace: flag-service
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: self-healer-rollout-restart}
+subjects: [{kind: ServiceAccount, name: self-healer, namespace: self-healing}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healer
+  namespace: targeting-service
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: self-healer-rollout-restart}
+subjects: [{kind: ServiceAccount, name: self-healer, namespace: self-healing}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healer
+  namespace: evaluation-service
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: self-healer-rollout-restart}
+subjects: [{kind: ServiceAccount, name: self-healer, namespace: self-healing}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healer
+  namespace: analytics-service
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: self-healer-rollout-restart}
+subjects: [{kind: ServiceAccount, name: self-healer, namespace: self-healing}]
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: self-healer-secrets
+  namespace: self-healing
+spec:
+  refreshInterval: 1m
+  secretStoreRef:
+    name: aws-secretsmanager
+    kind: ClusterSecretStore
+  target:
+    name: self-healer-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: SELF_HEALER_TOKEN
+      remoteRef: {key: togglemaster/prod/observability, property: SELF_HEALER_TOKEN}
+    - secretKey: DISCORD_WEBHOOK_URL
+      remoteRef: {key: togglemaster/prod/observability, property: DISCORD_WEBHOOK_URL}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: self-healer-config
+  namespace: self-healing
+data:
+  # Pares namespace/deployment que a automação PODE reiniciar.
+  ALLOWED_TARGETS: "auth-service/auth-service,flag-service/flag-service,targeting-service/targeting-service,evaluation-service/evaluation-service"
+  # Anti-loop: no máximo 1 restart por alvo a cada 5 min. Se o restart não
+  # resolver, o alerta continua Firing e o humano (PagerDuty) assume.
+  COOLDOWN_SECONDS: "300"
+  ROLLOUT_TIMEOUT_SECONDS: "300"
+  OTEL_SERVICE_NAME: "self-healer"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4318"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+  OTEL_LOGS_EXPORTER: "none"
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  OTEL_PYTHON_FLASK_EXCLUDED_URLS: "health"
+  OTEL_SEMCONV_STABILITY_OPT_IN: "http"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=prod"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: self-healer
+  namespace: self-healing
+  labels:
+    app: self-healer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: self-healer
+  template:
+    metadata:
+      labels:
+        app: self-healer
+    spec:
+      serviceAccountName: self-healer
+      containers:
+      - image: 198518420325.dkr.ecr.us-east-1.amazonaws.com/self-healer:v1.0.0-bootstrap
+        name: self-healer
+        ports:
+          - containerPort: 8080
+        envFrom:
+          - configMapRef:
+              name: self-healer-config
+          - secretRef:
+              name: self-healer-secrets
+        resources:
+          requests: {cpu: "50m", memory: "96Mi"}
+          limits: {cpu: "300m", memory: "256Mi"}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        readinessProbe:
+          httpGet: {path: /health, port: 8080}
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: {path: /health, port: 8080}
+          initialDelaySeconds: 10
+          periodSeconds: 15
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: self-healer
+  namespace: self-healing
+spec:
+  selector:
+    app: self-healer
+  ports:
+    - port: 80
+      targetPort: 8080

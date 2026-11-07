@@ -1,0 +1,32 @@
+# Onda -5: OpenTelemetry Collector (DaemonSet). Depois dos backends
+# (Prometheus/Loki, onda -6) e antes de qualquer microsserviço (onda 20+),
+# para nenhum span ou log da subida das apps se perder.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  project: default
+  sources:
+    - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+      chart: opentelemetry-collector
+      targetRevision: 0.178.2
+      helm:
+        releaseName: otel-collector
+        valueFiles:
+          - $values/techchallange4/kubernetes/observability/values/otel-collector.yaml
+    - repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

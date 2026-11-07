@@ -1,0 +1,18 @@
+# Grafana publicado em https://<ELB-do-Traefik>/grafana
+# SEM strip-prefix: com serve_from_sub_path o Grafana espera receber o
+# /grafana (mesma lógica do Argo CD em argocd/ingressroute.yaml).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: PathPrefix(`/grafana`)
+      kind: Rule
+      services:
+        - name: kps-grafana
+          namespace: observability
+          port: 80

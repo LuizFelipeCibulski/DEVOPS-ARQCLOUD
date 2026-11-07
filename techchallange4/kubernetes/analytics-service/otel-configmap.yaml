@@ -1,0 +1,33 @@
+# =====================================================================
+# Fase 4 - configuracao OpenTelemetry do analytics-service
+# ---------------------------------------------------------------------
+# So variaveis PADRAO da especificacao OTel (OTEL_*): o codigo nao sabe
+# onde fica o Collector nem o New Relic. Trocar de backend e mudar o
+# Collector, sem rebuild de imagem.
+#
+# O endpoint e o Service do Collector com internalTrafficPolicy: Local -
+# cada pod fala com o Collector (DaemonSet) do PROPRIO no.
+# =====================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-service-otel
+  namespace: analytics-service
+data:
+  OTEL_SERVICE_NAME: "analytics-service"
+  # HTTP/protobuf (4318): exporter puro Python, sem compilar grpcio no Alpine.
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4318"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+  OTEL_TRACES_EXPORTER: "otlp"
+  OTEL_METRICS_EXPORTER: "otlp"
+  # Logs NAO vao por OTLP: o Collector ja coleta o stdout de TODOS os
+  # containers (filelog). Mandar pelos dois caminhos duplicaria cada linha.
+  OTEL_LOGS_EXPORTER: "none"
+  # Injeta trace_id/span_id no formato do log -> correlacao Loki <-> trace.
+  OTEL_PYTHON_LOG_CORRELATION: "true"
+  # Probes do kubelet a cada 10-15s virariam milhares de traces inuteis.
+  OTEL_PYTHON_FLASK_EXCLUDED_URLS: "health"
+  # Semantica HTTP estavel (http.response.status_code), igual ao Go: o
+  # spanmetrics e o alerta usam UM nome de atributo para todos.
+  OTEL_SEMCONV_STABILITY_OPT_IN: "http"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=prod,service.version=v1.0.0"

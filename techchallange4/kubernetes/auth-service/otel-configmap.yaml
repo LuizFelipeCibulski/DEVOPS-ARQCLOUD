@@ -1,0 +1,22 @@
+# =====================================================================
+# Fase 4 - configuracao OpenTelemetry do auth-service
+# ---------------------------------------------------------------------
+# So variaveis PADRAO da especificacao OTel (OTEL_*): o codigo nao sabe
+# onde fica o Collector nem o New Relic. Trocar de backend e mudar o
+# Collector, sem rebuild de imagem.
+#
+# O endpoint e o Service do Collector com internalTrafficPolicy: Local -
+# cada pod fala com o Collector (DaemonSet) do PROPRIO no.
+# =====================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-otel
+  namespace: auth-service
+data:
+  OTEL_SERVICE_NAME: "auth-service"
+  # gRPC (4317) - o SDK Go usa o exporter otlptracegrpc/otlpmetricgrpc.
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4317"
+  # Trafego dentro do cluster, sem TLS ate o Collector do proprio no.
+  OTEL_EXPORTER_OTLP_INSECURE: "true"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=prod,service.version=v1.0.0"

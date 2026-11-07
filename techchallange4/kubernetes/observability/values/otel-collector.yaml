@@ -1,0 +1,196 @@
+# =====================================================================
+# OpenTelemetry Collector - a peça central da Fase 4
+# ---------------------------------------------------------------------
+# RECEBE, PROCESSA e EXPORTA os 3 sinais. Nenhum microsserviço conhece
+# Prometheus, Loki ou New Relic: todos falam só OTLP com este Collector.
+#
+#   apps ──OTLP traces──▶ ┌───────────────┐ ──▶ New Relic (APM, Service Map)
+#   apps ──OTLP métricas▶ │ OTel Collector│ ──▶ spanmetrics ──▶ Prometheus
+#   /var/log/pods ──────▶ │  (DaemonSet)  │ ──▶ Prometheus (remote write)
+#    (filelog: TODOS os   └───────────────┘ ──▶ Loki (OTLP /otlp)
+#     containers)                           ──▶ New Relic (logs das apps)
+#
+# Por que DaemonSet (um Collector por nó) e não Deployment:
+#   - o receiver filelog precisa ler /var/log/pods DO NÓ onde o container
+#     roda - só um DaemonSet enxerga os logs de todos os nós;
+#   - com internalTrafficPolicy: Local, cada pod envia OTLP para o
+#     Collector do próprio nó: sem salto de rede entre nós.
+#
+# Imagem "contrib": a "core" não tem filelog, k8sattributes, spanmetrics
+# nem prometheusremotewrite.
+# =====================================================================
+mode: daemonset
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+fullnameOverride: otel-collector
+
+# Presets do chart: criam o receiver/processor E o RBAC/volumes que eles
+# precisam (hostPath de /var/log/pods, permissão de ler pods/namespaces).
+presets:
+  logsCollection:
+    enabled: true
+    includeCollectorLogs: false   # evita loop: logar o próprio log
+    storeCheckpoints: true        # não reenvia tudo se o pod reiniciar
+  kubernetesAttributes:
+    enabled: true                 # adiciona k8s.namespace.name, k8s.pod.name, k8s.deployment.name...
+
+# O DaemonSet não ganha Service por padrão - os apps precisam de um nome
+# DNS estável: otel-collector.observability.svc.cluster.local
+service:
+  enabled: true
+  internalTrafficPolicy: Local
+
+ports:
+  otlp:
+    enabled: true
+  otlp-http:
+    enabled: true
+  jaeger-compact: {enabled: false}
+  jaeger-thrift: {enabled: false}
+  jaeger-grpc: {enabled: false}
+  zipkin: {enabled: false}
+
+# License key do New Relic vem do Secrets Manager via ExternalSecret.
+# optional: true -> o Collector sobe mesmo antes de você cadastrar a
+# chave (só o export para o New Relic falha até lá; Prometheus e Loki
+# funcionam normalmente).
+extraEnvs:
+  - name: NEW_RELIC_LICENSE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: observability-secrets
+        key: NEW_RELIC_LICENSE_KEY
+        optional: true
+  - name: K8S_NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 512Mi}
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:MY_POD_IP}:4317
+        http:
+          endpoint: ${env:MY_POD_IP}:4318
+    # filelog: injetado pelo preset logsCollection (lê /var/log/pods/*)
+
+  processors:
+    # 1º sempre: recusa dados antes de estourar a memória (OOMKill).
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+
+    # Identidade estável por pod. O spanmetrics e o remote-write viram
+    # séries Prometheus com instance=<service.instance.id>. Sem isso, os
+    # Collectors de nós diferentes gerariam a MESMA série para o mesmo
+    # serviço e o Prometheus rejeitaria amostras (duplicate sample).
+    resource/identity:
+      attributes:
+        - key: service.instance.id
+          from_attribute: k8s.pod.uid
+          action: insert
+        - key: k8s.cluster.name
+          value: togglemaster-prod
+          action: upsert
+        - key: deployment.environment.name
+          value: prod
+          action: insert
+
+    # Logs coletados do disco não têm service.name: usamos o nome do
+    # Deployment (vira o label service_name no Loki e a entidade no NR).
+    resource/logs-service-name:
+      attributes:
+        - key: service.name
+          from_attribute: k8s.deployment.name
+          action: insert
+        - key: service.name
+          from_attribute: k8s.container.name
+          action: insert
+
+    # Só os logs dos 5 microsserviços + self-healer vão ao New Relic
+    # ("logs in context" ao lado do trace). Infra fica só no Loki:
+    # economiza a cota gratuita e evita ruído no APM.
+    filter/apps-only:
+      error_mode: ignore
+      logs:
+        log_record:
+          - 'not IsMatch(resource.attributes["k8s.namespace.name"], "^(auth|flag|targeting|evaluation|analytics)-service$|^self-healing$")'
+
+    batch:
+      send_batch_size: 1024
+      timeout: 5s
+
+  connectors:
+    # spanmetrics: transforma TRACES em MÉTRICAS RED (Rate, Errors,
+    # Duration) com os mesmos rótulos para Go e Python. É daqui que saem
+    # a "taxa de requisições" do dashboard e o alerta de 5xx.
+    #   traces_span_metrics_calls_total{service_name, span_name, span_kind,
+    #       status_code, http_response_status_code, http_request_method}
+    #   traces_span_metrics_duration_seconds_bucket{...}
+    spanmetrics:
+      histogram:
+        unit: s
+        explicit:
+          buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s]
+      dimensions:
+        - name: http.response.status_code
+        - name: http.request.method
+      exemplars:
+        enabled: true
+      metrics_flush_interval: 15s
+      aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
+
+  exporters:
+    # APM comercial: New Relic aceita OTLP nativo. A license key vai no
+    # header api-key. Endpoint US; conta EU usa otlp.eu01.nr-data.net.
+    otlphttp/newrelic:
+      endpoint: https://otlp.nr-data.net
+      headers:
+        api-key: ${env:NEW_RELIC_LICENSE_KEY}
+      compression: gzip
+      sending_queue:
+        enabled: true
+        queue_size: 2000
+      retry_on_failure:
+        enabled: true
+        max_elapsed_time: 120s
+
+    prometheusremotewrite:
+      endpoint: http://kps-prometheus.observability.svc.cluster.local:9090/api/v1/write
+      # Mantém k8s.namespace.name etc. em target_info (não em toda série):
+      # evita explosão de cardinalidade.
+      resource_to_telemetry_conversion:
+        enabled: false
+      target_info:
+        enabled: true
+
+    otlphttp/loki:
+      endpoint: http://loki.observability.svc.cluster.local:3100/otlp
+
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, k8sattributes, resource/identity, batch]
+        exporters: [otlphttp/newrelic, spanmetrics]
+      metrics:
+        receivers: [otlp, spanmetrics]
+        processors: [memory_limiter, k8sattributes, resource/identity, batch]
+        exporters: [prometheusremotewrite, otlphttp/newrelic]
+      logs:
+        receivers: [filelog]
+        processors: [memory_limiter, k8sattributes, resource/logs-service-name, resource/identity, batch]
+        exporters: [otlphttp/loki]
+      logs/newrelic:
+        receivers: [filelog]
+        processors: [memory_limiter, k8sattributes, filter/apps-only, resource/logs-service-name, resource/identity, batch]
+        exporters: [otlphttp/newrelic]

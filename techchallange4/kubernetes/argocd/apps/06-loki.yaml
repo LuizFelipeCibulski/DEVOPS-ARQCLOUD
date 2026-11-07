@@ -1,0 +1,31 @@
+# Onda -6: Loki (logs). Recebe dos Collectors via OTLP (/otlp).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: 7.5.0
+      helm:
+        releaseName: loki
+        valueFiles:
+          - $values/techchallange4/kubernetes/observability/values/loki.yaml
+    - repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

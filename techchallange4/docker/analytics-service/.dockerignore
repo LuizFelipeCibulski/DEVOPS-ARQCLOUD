@@ -1,0 +1,14 @@
+# Evita que credenciais e lixo local entrem no contexto de build.
+# auth-service e evaluation-service usam "COPY . ." no estágio builder:
+# sem isso o .env iria parar dentro de uma camada da imagem.
+.env
+.env.*
+*.sarif
+coverage.out
+db/
+README.md
+.git
+.gitignore
+__pycache__/
+*.pyc
+.venv/

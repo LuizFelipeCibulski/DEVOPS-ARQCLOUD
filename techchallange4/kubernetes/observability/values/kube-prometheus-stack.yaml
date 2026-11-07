@@ -1,0 +1,149 @@
+# =====================================================================
+# kube-prometheus-stack - Prometheus + Grafana + exporters de infra
+# ---------------------------------------------------------------------
+# Instalado pelo Argo CD (argocd/apps/06-kube-prometheus-stack.yaml) com
+# multi-source: o chart vem do repo Helm, ESTE arquivo vem do git.
+#
+# Papel de cada peça na arquitetura da Fase 4:
+#   Prometheus      -> métricas de INFRA (scrape: node-exporter, kubelet/
+#                      cAdvisor, kube-state-metrics) + métricas das APPS,
+#                      que chegam EMPURRADAS pelo OTel Collector via
+#                      remote-write (enableRemoteWriteReceiver).
+#   Grafana         -> visualização + alertas (Grafana Unified Alerting)
+#   Alertmanager    -> DESLIGADO: quem roteia alertas é o próprio Grafana
+#                      (PagerDuty, Discord, webhook do self-healer).
+# =====================================================================
+fullnameOverride: kps
+
+crds:
+  enabled: true
+
+alertmanager:
+  enabled: false
+
+# EKS não expõe etcd/scheduler/controller-manager: sem isto o Prometheus
+# mostra alvos DOWN eternos e regras disparando à toa (alert fatigue).
+kubeEtcd: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeProxy: {enabled: false}
+
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeControllerManager: false
+    kubeProxy: false
+
+prometheusOperator:
+  # Webhooks de admissão são hooks do Helm com Job de certificado; no
+  # Argo CD isso gera ciclos de OutOfSync. Não agrega ao desafio.
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 256Mi}
+
+prometheus:
+  prometheusSpec:
+    # O OTel Collector EMPURRA métricas para /api/v1/write.
+    enableRemoteWriteReceiver: true
+    # Sem EBS CSI no Academy: armazenamento em emptyDir. Reiniciar o pod
+    # perde o histórico - aceitável para o desafio (ver "Limites").
+    retention: 2d
+    retentionSize: 4GB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    # Pega ServiceMonitors/PodMonitors de qualquer namespace, não só os
+    # com o label do release.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 200m, memory: 1Gi}
+      limits: {memory: 2Gi}
+
+kube-state-metrics:
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+prometheus-node-exporter:
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+grafana:
+  # Pod de "helm test": o Argo CD não executa testes do Helm e o mostraria
+  # como recurso órfão.
+  testFramework:
+    enabled: false
+
+  # Senha do admin vem do Secrets Manager (via ExternalSecret
+  # observability-secrets). Senha gerada pelo chart mudaria a cada render
+  # do Argo CD - o Secret ficaria eternamente OutOfSync.
+  admin:
+    existingSecret: observability-secrets
+    userKey: GRAFANA_ADMIN_USER
+    passwordKey: GRAFANA_ADMIN_PASSWORD
+
+  # Tokens do PagerDuty/Discord/self-healer como variáveis de ambiente:
+  # os arquivos de provisionamento de alerta referenciam ${VAR} e o
+  # Grafana interpola na carga. Nenhum token fica no git.
+  envFromSecrets:
+    - name: observability-secrets
+
+  # Publicado no Traefik em https://<ELB>/grafana (mesmo padrão do Argo CD)
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s/grafana/"
+      serve_from_sub_path: true
+    unified_alerting:
+      enabled: true
+    analytics:
+      check_for_updates: false
+      reporting_enabled: false
+
+  # Sidecars: tudo que for ConfigMap com o label certo vira configuração
+  # do Grafana, sem clicar em nada (dashboard, datasource e alerta como
+  # código, versionados e aplicados pelo GitOps).
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+    datasources:
+      enabled: true
+    alerts:
+      enabled: true
+      label: grafana_alert
+      labelValue: "1"
+      searchNamespace: ALL
+
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      jsonData:
+        maxLines: 1000
+        # Transforma o trace_id que aparece nas linhas de log em link
+        # clicável para o trace no New Relic.
+        derivedFields:
+          - name: trace_id
+            matcherRegex: 'trace_id=(\w+)'
+            url: 'https://one.newrelic.com/distributed-tracing?query=trace.id%3D%27$${__value.raw}%27'
+            urlDisplayLabel: Abrir trace no New Relic
+
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 512Mi}

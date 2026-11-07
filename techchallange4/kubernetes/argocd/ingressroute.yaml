@@ -1,0 +1,75 @@
+# =====================================================================
+# Acesso à UI do Argo CD via Traefik
+# ---------------------------------------------------------------------
+# Duas pegadinhas que fazem este arquivo ser diferente do
+# traefik/ingressroute.yaml dos microsserviços:
+#
+# 1. O argocd-server fala HTTPS com certificado self-signed e redireciona
+#    HTTP -> HTTPS por conta própria. Se o Traefik encaminhar HTTP puro
+#    para ele, o navegador entra em loop infinito de redirect (ERR_TOO_
+#    MANY_REDIRECTS). Por isso o ServersTransport abaixo: o Traefik fala
+#    HTTPS com o backend e ignora o self-signed.
+#
+# 2. NÃO existe stripPrefix aqui. Os microsserviços removem o prefixo
+#    porque a aplicação escuta em /. O Argo CD é o contrário: com
+#    server.rootpath ele *espera* receber o /argocd. Se você adicionar um
+#    strip-prefix, a UI carrega mas os assets e a API dão 404.
+# =====================================================================
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: argocd-https
+  namespace: argocd
+spec:
+  # O cert do argocd-server é gerado por ele mesmo e não tem o hostname
+  # do ELB no SAN - validar aqui não agrega nada, o tráfego não sai do
+  # cluster. A criptografia continua ativa.
+  insecureSkipVerify: true
+
+---
+# OPÇÃO A (ativa) - por path, na mesma URL dos microsserviços.
+# Não precisa de domínio nem DNS: reaproveita o hostname do ELB que o
+# Traefik já expõe. Exige o server.rootpath configurado (ver install.txt).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: PathPrefix(`/argocd`)
+      kind: Rule
+      services:
+        - name: argocd-server
+          namespace: argocd
+          port: 443
+          scheme: https
+          serversTransport: argocd-https
+
+---
+# OPÇÃO B - por hostname dedicado. Mais limpo (não precisa de rootpath,
+# e o CLI `argocd` funciona sem --grpc-web), mas exige um domínio
+# apontando para o ELB do Traefik. Se for usar, descomente daqui pra
+# baixo, comente a Opção A e desfaça o rootpath do install.txt.
+#
+# apiVersion: traefik.io/v1alpha1
+# kind: IngressRoute
+# metadata:
+#   name: argocd-server-host
+#   namespace: argocd
+# spec:
+#   entryPoints:
+#     - websecure
+#   routes:
+#     - match: Host(`argocd.seu-dominio.com`)
+#       kind: Rule
+#       services:
+#         - name: argocd-server
+#           namespace: argocd
+#           port: 443
+#           scheme: https
+#           serversTransport: argocd-https

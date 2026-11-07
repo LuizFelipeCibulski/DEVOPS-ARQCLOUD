@@ -1,0 +1,111 @@
+# =====================================================================
+# Migração de schema do targeting-service
+# ---------------------------------------------------------------------
+# Por que isto existe: o Terraform cria a instância RDS e o banco, mas
+# não cria tabela nenhuma. O schema estava só em
+# docker/targeting-service/db/init.sql, documentado no README como um
+# `psql -f` manual — que nunca foi executado contra o RDS. O sintoma foi
+# o auth-service respondendo 500 em POST /admin/keys com
+# 'relation "targeting_rules" does not exist', o que travava o Job de
+# bootstrap e, em cascata, o evaluation-service.
+#
+# O SQL abaixo espelha docker/targeting-service/db/init.sql, com duas
+# adaptações obrigatórias para RDS:
+#   - sem CREATE DATABASE: o banco já vem do Terraform, e o comando
+#     falharia com "already exists"
+#   - sem \c (meta-comando do psql): a DATABASE_URL já aponta para o
+#     banco certo
+#
+# Mantenha os dois arquivos em sincronia ao mudar o schema.
+# =====================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: targeting-service-schema
+  namespace: targeting-service
+data:
+  schema.sql: |
+    
+    -- Conecta no novo banco para criar as tabelas dele abaixo
+    
+    CREATE TABLE IF NOT EXISTS targeting_rules (
+        id SERIAL PRIMARY KEY,
+    
+        -- 'flag_name' é a chave de negócio única. 
+        -- Cada flag pode ter no máximo UMA regra de segmentação.
+        flag_name VARCHAR(100) UNIQUE NOT NULL,
+        
+        -- Se a regra de segmentação em si está ativa ou não
+        is_enabled BOOLEAN NOT NULL DEFAULT true,
+        
+        -- Armazena a lógica da regra como um JSON.
+        -- Ex: {"type": "PERCENTAGE", "value": 50}
+        -- Ex: {"type": "USER_LIST", "values": ["u1", "u2"]}
+        rules JSONB NOT NULL,
+        
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Trigger para atualizar 'updated_at' automaticamente (igual ao do flag-service)
+    CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      NEW.updated_at = NOW();
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    
+    DROP TRIGGER IF EXISTS set_timestamp ON targeting_rules;
+    
+    CREATE TRIGGER set_timestamp
+    BEFORE UPDATE ON targeting_rules
+    FOR EACH ROW
+    EXECUTE PROCEDURE trigger_set_timestamp();
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: targeting-service-migrate
+  namespace: targeting-service
+  annotations:
+    # Hook de Sync (não PreSync): precisa rodar DEPOIS que o
+    # ExternalSecret materializou o Secret com a DATABASE_URL, e ANTES
+    # do Deployment. Um PreSync rodaria antes do Secret existir e
+    # travaria toda instalação nova.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: public.ecr.aws/docker/library/postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: targeting-secrets
+                  key: DATABASE_URL
+          args:
+            - |
+              set -eu
+              echo "Aplicando schema em targeting-service..."
+              # ON_ERROR_STOP faz o psql sair != 0 no primeiro erro; sem
+              # isso o Job passaria verde com o schema pela metade.
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /schema/schema.sql
+              echo "Schema aplicado."
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "256Mi" }
+      volumes:
+        - name: schema
+          configMap:
+            name: targeting-service-schema

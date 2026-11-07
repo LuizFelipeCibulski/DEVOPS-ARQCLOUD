@@ -1,0 +1,253 @@
+# =====================================================================
+# Grafana Unified Alerting como código
+# ---------------------------------------------------------------------
+# Cada ConfigMap com o label grafana_alert: "1" é lido pelo sidecar do
+# Grafana e aplicado como provisionamento (aparece na UI com o selo
+# "Provisioned" - não editável à mão, o git é a fonte da verdade).
+#
+# Fluxo de um incidente:
+#   regra (Prometheus) --Firing--> política de notificação
+#      ├─ remediation=rollout-restart -> webhook self-healer (Runbook Automation)
+#      ├─ severity=critical           -> PagerDuty (abre incidente, acorda o plantão)
+#      └─ team=togglemaster           -> Discord (ChatOps, mensagem detalhada)
+#
+# ATENÇÃO ao '$': o Grafana interpola variáveis de ambiente (${VAR}) nos
+# arquivos de provisionamento. Por isso os tokens entram como ${...} e,
+# dentro de templates/anotações, um '$' literal precisa ser '$$'.
+# =====================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: togglemaster-alert-rules
+  namespace: observability
+  labels:
+    grafana_alert: "1"
+data:
+  rules.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: togglemaster-slo
+        folder: ToggleMaster
+        interval: 30s
+        rules:
+          # ----------------------------------------------------------------
+          # CRÍTICO: o alerta do PDF. Taxa de 5xx do auth-service > 5%.
+          # ----------------------------------------------------------------
+          # Fonte: métrica gerada pelo spanmetrics do OTel Collector a partir
+          # dos spans SERVER do auth-service. "or vector(0)" faz o numerador
+          # valer 0 quando não há nenhum 5xx (senão a divisão some e o alerta
+          # vira NoData). Sem tráfego nenhum, o denominador some -> NoData,
+          # tratado como OK (não acorda ninguém às 3h por falta de tráfego).
+          - uid: auth-5xx-rate
+            title: auth-service - taxa de erros 5xx acima de 5%
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 600, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: >-
+                    (sum(rate(traces_span_metrics_calls_total{service_name="auth-service",span_kind="SPAN_KIND_SERVER",http_response_status_code=~"5.."}[2m])) or vector(0))
+                    /
+                    sum(rate(traces_span_metrics_calls_total{service_name="auth-service",span_kind="SPAN_KIND_SERVER"}[2m]))
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: gt, params: [0.05]}
+            noDataState: OK
+            execErrState: Error
+            # "for": precisa ficar acima do limite por 1 min seguido. Um pico
+            # isolado (1 erro em 3 requisições) não abre incidente - é a
+            # principal defesa contra alert fatigue.
+            for: 1m
+            labels:
+              severity: critical
+              team: togglemaster
+              service: auth-service
+              # Lidos pelo self-healer: QUAL ação e EM QUEM.
+              remediation: rollout-restart
+              namespace: auth-service
+              deployment: auth-service
+            annotations:
+              summary: "auth-service respondendo {{ humanizePercentage $$values.A.Value }} das requisições com HTTP 5xx (limite: 5%)"
+              description: "flag-service e targeting-service dependem do /validate do auth: com ele falhando, nenhuma flag é avaliada. O self-healer vai executar rollout restart automaticamente."
+              runbook_url: "https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD/blob/main/techchallange4/RUNBOOK.md#auth-service-5xx"
+
+          # ----------------------------------------------------------------
+          # WARNING: latência p95 do evaluation-service (caminho quente)
+          # ----------------------------------------------------------------
+          # Só notifica no Discord: lentidão é para investigar em horário
+          # comercial, não para acordar ninguém.
+          - uid: evaluation-p95-latency
+            title: evaluation-service - latência p95 acima de 1s
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 600, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: >-
+                    histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_seconds_bucket{service_name="evaluation-service",span_kind="SPAN_KIND_SERVER"}[5m])))
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: gt, params: [1]}
+            noDataState: OK
+            execErrState: Error
+            for: 5m
+            labels:
+              severity: warning
+              team: togglemaster
+              service: evaluation-service
+            annotations:
+              summary: "p95 do evaluation-service em {{ humanizeDuration $$values.A.Value }} (limite: 1s)"
+              description: "Abra o trace mais lento no New Relic para ver qual dependência (Redis, flag, targeting) está segurando a resposta."
+              runbook_url: "https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD/blob/main/techchallange4/RUNBOOK.md#evaluation-latencia"
+
+          # ----------------------------------------------------------------
+          # WARNING: containers reiniciando (CrashLoop) nos microsserviços
+          # ----------------------------------------------------------------
+          - uid: app-pod-restarts
+            title: Microsserviço reiniciando repetidamente
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 900, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  expr: >-
+                    max(increase(kube_pod_container_status_restarts_total{namespace=~"(auth|flag|targeting|evaluation|analytics)-service"}[15m])) or vector(0)
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator: {type: gt, params: [3]}
+            noDataState: OK
+            execErrState: Error
+            for: 2m
+            labels:
+              severity: warning
+              team: togglemaster
+              service: kubernetes
+            annotations:
+              summary: "Algum container dos microsserviços reiniciou mais de 3 vezes em 15 min"
+              description: "Provável CrashLoopBackOff. Veja os logs no Loki: {k8s_namespace_name=~\".+-service\"} |= \"ERRO\""
+              runbook_url: "https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD/blob/main/techchallange4/RUNBOOK.md#crashloop"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: togglemaster-alert-notifications
+  namespace: observability
+  labels:
+    grafana_alert: "1"
+data:
+  templates.yaml: |
+    apiVersion: 1
+    templates:
+      - orgId: 1
+        name: togglemaster
+        template: |
+          {{ define "togglemaster.title" }}{{ if eq .Status "firing" }}🔥 FIRING{{ else }}✅ RESOLVED{{ end }} | {{ .CommonLabels.alertname }}{{ end }}
+
+          {{ define "togglemaster.message" }}{{ range .Alerts }}
+          **{{ if eq .Status "firing" }}🔥 Disparando{{ else }}✅ Resolvido{{ end }}:** {{ .Labels.alertname }}
+          **Serviço:** `{{ .Labels.service }}`  |  **Severidade:** `{{ .Labels.severity }}`
+          **Resumo:** {{ .Annotations.summary }}
+          **Impacto:** {{ .Annotations.description }}
+          **Início:** {{ .StartsAt.Format "02/01/2006 15:04:05 MST" }}{{ if eq .Status "resolved" }}  |  **Fim:** {{ .EndsAt.Format "15:04:05 MST" }}{{ end }}
+          {{ if .Labels.remediation }}**Self-healing:** `{{ .Labels.remediation }}` em `{{ .Labels.namespace }}/{{ .Labels.deployment }}`
+          {{ end }}**Runbook:** {{ .Annotations.runbook_url }}
+          {{ end }}{{ end }}
+
+          {{ define "togglemaster.pagerduty" }}[{{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.alertname }} - {{ .CommonAnnotations.summary }}{{ end }}
+
+  contactpoints.yaml: |
+    apiVersion: 1
+    contactPoints:
+      # Gerenciamento de incidentes: Events API v2 do PagerDuty. Cada
+      # alerta firing abre (trigger) um incidente; o resolved fecha
+      # (resolve) o MESMO incidente - a dedup_key é o fingerprint do grupo.
+      - orgId: 1
+        name: pagerduty-oncall
+        receivers:
+          - uid: pagerduty-oncall
+            type: pagerduty
+            settings:
+              integrationKey: ${PAGERDUTY_ROUTING_KEY}
+              severity: critical
+              class: togglemaster
+              component: '{{ .CommonLabels.service }}'
+              group: '{{ .CommonLabels.namespace }}'
+              summary: '{{ template "togglemaster.pagerduty" . }}'
+
+      # ChatOps: mensagem detalhada no canal do Discord.
+      - orgId: 1
+        name: discord-togglemaster
+        receivers:
+          - uid: discord-togglemaster
+            type: discord
+            settings:
+              url: ${DISCORD_WEBHOOK_URL}
+              title: '{{ template "togglemaster.title" . }}'
+              message: '{{ template "togglemaster.message" . }}'
+              use_discord_username: false
+
+      # Runbook Automation: o self-healer recebe o alerta e age sozinho.
+      - orgId: 1
+        name: self-healer-webhook
+        receivers:
+          - uid: self-healer-webhook
+            type: webhook
+            settings:
+              url: http://self-healer.self-healing.svc.cluster.local/webhook/grafana
+              httpMethod: POST
+              authorization_scheme: Bearer
+              authorization_credentials: ${SELF_HEALER_TOKEN}
+
+  policies.yaml: |
+    apiVersion: 1
+    policies:
+      - orgId: 1
+        receiver: discord-togglemaster
+        # Agrupa por alerta+serviço: 50 pods falhando juntos viram UMA
+        # notificação, não 50 (alert fatigue).
+        group_by: [alertname, service]
+        group_wait: 10s
+        group_interval: 1m
+        repeat_interval: 4h
+        routes:
+          # 1) Automação primeiro: o runbook roda ao mesmo tempo em que o
+          #    humano é avisado. continue: true = segue avaliando as rotas.
+          - receiver: self-healer-webhook
+            object_matchers:
+              - [remediation, "=", rollout-restart]
+            group_wait: 5s
+            continue: true
+          # 2) Só CRÍTICO vai ao PagerDuty (acorda alguém).
+          - receiver: pagerduty-oncall
+            object_matchers:
+              - [severity, "=", critical]
+            continue: true
+          # 3) Tudo do time vai ao Discord (critical e warning).
+          - receiver: discord-togglemaster
+            object_matchers:
+              - [team, "=", togglemaster]

@@ -1,0 +1,64 @@
+# Copie para terraform.tfvars e ajuste. terraform.tfvars 
+
+project_name = "togglemaster"
+environment  = "dev"
+aws_region   = "us-east-1"
+
+# ------------------------------------------------------------------
+# Opcao A do desafio - AWS Academy
+# ------------------------------------------------------------------
+is_academy         = true
+lab_role_name      = "LabRole"
+manage_eks_cluster = true # false = so a VPC; voce cria o EKS pelo Console
+
+# ------------------------------------------------------------------
+# Opcao B do desafio - conta AWS normal (descomente e ajuste)
+# ------------------------------------------------------------------
+# is_academy         = false
+# manage_eks_cluster = true
+
+# ------------------------------------------------------------------
+# CI/CD - role assumida pelo GitHub Actions via OIDC.
+# O ARN dela e o valor do secret AWS_ROLE_TO_ASSUME que os workflows
+# dos microsservicos usam para publicar no ECR. So funciona em conta
+# normal (is_academy = false); em Academy use ../update-secrets-aws.sh.
+# ------------------------------------------------------------------
+# enable_github_oidc = true
+# github_repository  = "LuizFelipeCibulski/DEVOPS-ARQCLOUD"
+#
+# O provider OIDC do GitHub e unico por conta AWS - se
+# `aws iam list-open-id-connect-providers` ja mostrar o
+# token.actions.githubusercontent.com, deixe false ou o apply falha
+# com EntityAlreadyExists.
+# create_github_oidc_provider = false
+#
+# Se a role ja existe (criada a mao), coloque o nome dela aqui e rode o
+# `tofu import` do README em vez de deixar o Terraform criar outra.
+# github_oidc_role_name = "github-actions-ecr-push"
+
+# ------------------------------------------------------------------
+# Acesso a API do cluster EKS.
+# Por padrao o endpoint e PRIVADO - kubectl so funciona de dentro da
+# VPC. Para rodar kubectl da sua maquina, ligue o endpoint publico e
+# restrinja ao seu IP (e AQUI que o seu IP entra, nao no security
+# group):
+#   curl -s https://checkip.amazonaws.com
+# ------------------------------------------------------------------
+# endpoint_public_access = true
+# public_access_cidrs    = ["203.0.113.10/32"]
+
+azs                      = ["us-east-1a", "us-east-1b"]
+vpc_cidr                 = "10.0.0.0/16"
+public_subnet_cidrs      = ["10.0.0.0/24", "10.0.1.0/24"]
+private_app_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+private_db_subnet_cidrs  = ["10.0.20.0/24", "10.0.21.0/24"]
+single_nat_gateway       = true
+
+node_instance_types = ["t3.medium"]
+node_min_size       = 1
+node_desired_size   = 2
+node_max_size       = 4
+
+redis_serverless    = true
+dynamodb_table_name = "ToggleMasterAnalytics"
+sqs_queue_name      = "evaluation"

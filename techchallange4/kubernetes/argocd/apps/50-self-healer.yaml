@@ -1,0 +1,27 @@
+# Onda 50: Runbook Automation. Por último: os RoleBindings dele vivem nos
+# namespaces das apps, que nascem nas ondas 20-40.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: self-healer
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+    targetRevision: main
+    path: techchallange4/kubernetes/self-healing
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: self-healing
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 10
+      backoff: {duration: 15s, factor: 2, maxDuration: 5m}

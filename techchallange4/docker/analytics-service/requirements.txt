@@ -1,0 +1,21 @@
+Flask==3.1.2
+gunicorn==21.0.0
+python-dotenv==1.2.2
+boto3==1.43.89
+Werkzeug==3.1.4
+jaraco.context>=6.1.0
+msgpack>=1.2.1
+urllib3>=2.7.0
+
+# --- Fase 4: OpenTelemetry -------------------------------------------
+# Instrumentação automática: o Dockerfile roda o gunicorn atrás do
+# 'opentelemetry-instrument', que aplica os patches ANTES do app.py ser
+# importado. Pacotes listados um a um (e não 'opentelemetry-bootstrap')
+# para o build ser reproduzível e o Trivy enxergar cada dependência.
+# SDK 1.45.x <-> instrumentações 0.66bX são publicados em par.
+opentelemetry-distro==0.66b2
+opentelemetry-sdk==1.45.2
+opentelemetry-exporter-otlp-proto-http==1.45.2
+opentelemetry-instrumentation-flask==0.66b2
+opentelemetry-instrumentation-logging==0.66b2
+opentelemetry-instrumentation-botocore==0.66b2

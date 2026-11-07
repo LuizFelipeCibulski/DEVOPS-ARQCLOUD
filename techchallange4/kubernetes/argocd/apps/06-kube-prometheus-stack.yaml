@@ -1,0 +1,37 @@
+# Onda -6: Prometheus + Grafana + exporters (Fase 4).
+# Multi-source: o chart vem do repositório Helm e os values vêm DESTE
+# repositório git ($values). Mudar um value = commit, como qualquer manifesto.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+spec:
+  project: default
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 93.0.0
+      helm:
+        releaseName: kps
+        valueFiles:
+          - $values/techchallange4/kubernetes/observability/values/kube-prometheus-stack.yaml
+    - repoURL: https://github.com/LuizFelipeCibulski/DEVOPS-ARQCLOUD
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # CRDs do Prometheus Operator passam do limite do apply client-side.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: {duration: 30s, factor: 2, maxDuration: 5m}
