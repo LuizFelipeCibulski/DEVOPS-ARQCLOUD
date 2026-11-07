@@ -358,6 +358,7 @@ A fase 3 rodou em conta normal com IRSA. No Academy, `iam:CreateRole` é negado
 | `ClusterSecretStore` com `auth.jwt` | sem bloco `auth` (cadeia padrão do SDK) | `kubernetes/external-secrets/` |
 | GitHub → AWS por OIDC | chaves temporárias do Lab + `AWS_MODE=academy` | `.github/workflows/*.yml`, `update-secrets-aws.sh` |
 | 2× t3.medium (17 pods/nó) | **3× t3.large** (35 pods/nó): a stack passa de 60 pods | `iac/variables.tf` |
+| IMDS hop limit 1 (padrão do AL2023) | **launch template com hop limit 2**: sem isso nenhum pod alcança a LabRole | `iac/modules/eks/main.tf` |
 | — | ECR `self-healer` + cofre `togglemaster/prod/observability` | `iac/variables.tf`, `iac/modules/app-secrets` |
 
 Em conta normal, `is_academy = false` em `prod.auto.tfvars` volta a criar o IRSA.
@@ -522,6 +523,8 @@ opção que não depende de IAM role (proibida no Academy).
 | Chart do Collector renomeia componentes | versões novas usam `k8s_attributes`, `otlp_http`, `file_log` | normal: o chart traduz os nomes antigos |
 | `$` some do template de alerta | Grafana interpola env vars no provisionamento | `$$values` |
 | (Academy) role IRSA inexistente | anotação na SA faz o SDK tentar a role e não cair no nó | remover a anotação |
+| (Academy) `ClusterSecretStore` em `InvalidProviderConfig`: *"no EC2 IMDS role found ... context deadline exceeded"* | AL2023 sobe com IMDSv2 **hop limit 1**: o pod está 1 salto além do host e a resposta é descartada | launch template com `http_put_response_hop_limit = 2` (mantendo `http_tokens = required`) |
+| Trivy reprovou urllib3/gunicorn no CI, mas passou local horas antes | CVE nova publicada no meio do dia; `requirements.txt` herdados em CRLF faziam o `sed` não casar | subir versões + normalizar para LF. Gate de CVE é "vivo": o mesmo código pode reprovar amanhã |
 
 ---
 
@@ -531,6 +534,6 @@ opção que não depende de IAM role (proibida no Academy).
    e Grafana usam `emptyDir`. Se o pod for recriado, perde o histórico (o dashboard e
    os alertas voltam, porque são código).
 2. **Chaves do Lab expiram**: os pipelines precisam do `update-secrets-aws.sh` a cada sessão.
-3. **LabRole no nó** é mais ampla que o IRSA: qualquer pod tem as permissões dela. Em conta normal, volte ao IRSA.
+3. **LabRole no nó** é mais ampla que o IRSA: com hop limit 2, qualquer pod alcança as permissões dela. É o preço de não haver IRSA no Academy; em conta normal o launch template volta a hop limit 1 sozinho (`is_academy = false`) e o IRSA assume.
 4. **Sampling 100%**: adequado ao volume do desafio; em produção use `OTEL_TRACES_SAMPLER=parentbased_traceidratio` ou tail sampling no Collector.
 5. **Cooldown em memória** no self-healer: com mais de 1 réplica, precisaria de estado compartilhado (lease/ConfigMap).

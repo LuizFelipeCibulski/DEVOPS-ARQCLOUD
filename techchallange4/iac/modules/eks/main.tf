@@ -97,14 +97,52 @@ resource "aws_eks_cluster" "this" {
   ]
 }
 
+# ---------------------------------------------------------------------
+# Launch template dos nós - Fase 4 (AWS Academy)
+# ---------------------------------------------------------------------
+# O AMI AL2023 do EKS sobe com IMDSv2 e hop limit = 1: só processos do
+# PRÓPRIO host alcançam o metadata service. Um pod está um salto de rede
+# além (veth -> host), então a resposta é descartada e o SDK da AWS morre
+# com "ec2imds: GetMetadata ... context deadline exceeded".
+#
+# Em conta normal isso é o desejado (pods usam IRSA e não devem ver a role
+# do nó). No Academy NÃO há IRSA: ESO, analytics, evaluation, KEDA e o Job
+# de bootstrap só têm a LabRole do nó - então o hop limit precisa ser 2.
+# IMDSv2 (http_tokens = required) continua obrigatório: bloqueia SSRF
+# simples, que não consegue fazer o PUT do token.
+resource "aws_launch_template" "nodes" {
+  name_prefix = "${var.cluster_name}-ng-"
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = var.is_academy ? 2 : 1
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags          = merge(var.tags, { Name = "${var.cluster_name}-node" })
+  }
+
+  tags = var.tags
+}
+
 resource "aws_eks_node_group" "this" {
-  cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "${var.cluster_name}-ng"
-  node_role_arn   = local.node_role_arn
-  subnet_ids      = var.node_subnet_ids
+  cluster_name = aws_eks_cluster.this.name
+  # Prefixo (e não nome fixo) + create_before_destroy: quando o node group
+  # precisa ser substituído (ex.: mudou o launch template), o novo sobe
+  # ANTES do antigo ser drenado - os pods migram sem o cluster ficar sem nó.
+  node_group_name_prefix = "${var.cluster_name}-ng-"
+  node_role_arn          = local.node_role_arn
+  subnet_ids             = var.node_subnet_ids
 
   instance_types = var.node_instance_types
   capacity_type  = var.node_capacity_type
+
+  launch_template {
+    id      = aws_launch_template.nodes.id
+    version = aws_launch_template.nodes.latest_version
+  }
 
   scaling_config {
     desired_size = var.node_desired_size
@@ -114,6 +152,12 @@ resource "aws_eks_node_group" "this" {
 
   update_config {
     max_unavailable = 1
+  }
+
+  lifecycle {
+    create_before_destroy = true
+    # O cluster-autoscaler/HPA de nós pode mudar o desired; não brigar.
+    ignore_changes = [scaling_config[0].desired_size]
   }
 
   tags = var.tags
