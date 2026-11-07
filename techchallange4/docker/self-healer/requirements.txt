@@ -2,7 +2,7 @@ Flask==3.1.3
 Werkzeug==3.1.8
 gunicorn==22.0.0
 requests==2.34.2
-urllib3==2.7.0
+urllib3==2.8.0
 
 # OpenTelemetry: o próprio self-healer é observável (traces das ações e
 # a métrica self_healer_actions_total no Grafana).
