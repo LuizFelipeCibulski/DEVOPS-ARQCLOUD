@@ -63,10 +63,13 @@ extraEnvs:
         name: observability-secrets
         key: NEW_RELIC_LICENSE_KEY
         optional: true
-  - name: K8S_NODE_NAME
-    valueFrom:
-      fieldRef:
-        fieldPath: spec.nodeName
+# (K8S_NODE_NAME não é declarado aqui: o preset kubernetesAttributes do
+#  chart já injeta - duplicar gera aviso "hides previous definition".)
+#
+# ATENÇÃO à ordem na 1ª instalação: variável de ambiente só é lida no boot.
+# Se o Collector subir ANTES do ExternalSecret materializar a chave, ele
+# roda com a chave vazia (New Relic responde 401/403) até ser reiniciado.
+# O scripts/set-observability-secrets.sh já faz esse restart.
 
 resources:
   requests: {cpu: 100m, memory: 256Mi}

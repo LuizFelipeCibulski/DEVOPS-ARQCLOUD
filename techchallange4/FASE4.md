@@ -524,6 +524,9 @@ opção que não depende de IAM role (proibida no Academy).
 | `$` some do template de alerta | Grafana interpola env vars no provisionamento | `$$values` |
 | (Academy) role IRSA inexistente | anotação na SA faz o SDK tentar a role e não cair no nó | remover a anotação |
 | (Academy) `ClusterSecretStore` em `InvalidProviderConfig`: *"no EC2 IMDS role found ... context deadline exceeded"* | AL2023 sobe com IMDSv2 **hop limit 1**: o pod está 1 salto além do host e a resposta é descartada | launch template com `http_put_response_hop_limit = 2` (mantendo `http_tokens = required`) |
+| New Relic respondendo 401/403 com a chave certa | Collector subiu antes do ExternalSecret existir; env var só é lida no boot e a chave é `optional` | reiniciar o DaemonSet (o `set-observability-secrets.sh` já faz) |
+| `ScaledObject` recusado: *"already managed by the hpa 'hpa-analytics'"* | herança da fase 3: `hpa.yaml` manual + KEDA (que cria o próprio HPA) no mesmo Deployment | removido o `hpa.yaml` do analytics; o KEDA é o dono |
+| Argo CD preso em `waiting for healthy state` com tag velha | a operação de sync fixa a revisão do início; o commit do bot com a tag nova veio depois | terminar a operação (`status.operationState.phase=Terminating`) + hard refresh |
 | Trivy reprovou urllib3/gunicorn no CI, mas passou local horas antes | CVE nova publicada no meio do dia; `requirements.txt` herdados em CRLF faziam o `sed` não casar | subir versões + normalizar para LF. Gate de CVE é "vivo": o mesmo código pode reprovar amanhã |
 
 ---
