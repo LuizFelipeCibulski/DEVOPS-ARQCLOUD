@@ -15,6 +15,7 @@ workflow novo do zero sem copiar e colar no escuro.
 | `analytics-service.yml` | Pipeline do analytics-service | Python |
 | `flag-service.yml` | Pipeline do flag-service | Python |
 | `targeting-service.yml` | Pipeline do targeting-service | Python |
+| `self-healer.yml` | Pipeline do self-healer (Runbook Automation, Fase 4) | Python |
 | `terraform.yml` | Pipeline da infraestrutura | Terraform / IaC |
 
 São **3 moldes**, não 6 arquivos diferentes:

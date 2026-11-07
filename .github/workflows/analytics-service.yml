@@ -9,12 +9,12 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'techchallange3/docker/analytics-service/**'
+      - 'techchallange4/docker/analytics-service/**'
       - '.github/workflows/analytics-service.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'techchallange3/docker/analytics-service/**'
+      - 'techchallange4/docker/analytics-service/**'
       - '.github/workflows/analytics-service.yml'
 
 permissions:
@@ -27,7 +27,7 @@ concurrency:
 
 env:
   SERVICE_NAME: analytics-service
-  SERVICE_PATH: techchallange3/docker/analytics-service
+  SERVICE_PATH: techchallange4/docker/analytics-service
   PYTHON_VERSION: '3.11'
   AWS_REGION: us-east-1
   ECR_REPOSITORY: analytics-service
@@ -182,21 +182,27 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
-      - name: Configurar credenciais AWS (OIDC)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      # ---------- Autenticação AWS ----------
+      # A conta muda conforme a variável de repositório AWS_MODE:
+      #   normal  -> OIDC (role do IaC, sem chave nenhuma no GitHub)
+      #   academy -> chaves temporárias do Learner Lab (o Academy proíbe
+      #              criar IAM role). Renove a cada sessão com
+      #              techchallange4/update-secrets-aws.sh
+      - name: Configurar credenciais AWS (OIDC - conta normal)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.AWS_MODE != 'academy'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      #- name: Configurar credenciais AWS (Academy - Access Keys temporárias)
-      #  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      #  uses: aws-actions/configure-aws-credentials@v4
-      #  with:
-      #    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #    aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-      #    aws-region: ${{ env.AWS_REGION }}
+      - name: Configurar credenciais AWS (AWS Academy - sessão temporária)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.AWS_MODE == 'academy'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login no Amazon ECR
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -232,7 +238,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           IMAGE_URI: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}
-          MANIFESTO: techchallange3/kubernetes/analytics-service/deployment.yaml
+          MANIFESTO: techchallange4/kubernetes/analytics-service/deployment.yaml
         run: |
           set -euo pipefail
 

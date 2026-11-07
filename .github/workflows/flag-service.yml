@@ -9,12 +9,12 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'techchallange3/docker/flag-service/**'
+      - 'techchallange4/docker/flag-service/**'
       - '.github/workflows/flag-service.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'techchallange3/docker/flag-service/**'
+      - 'techchallange4/docker/flag-service/**'
       - '.github/workflows/flag-service.yml'
 
 concurrency:
@@ -23,7 +23,7 @@ concurrency:
 
 env:
   SERVICE_NAME: flag-service
-  SERVICE_PATH: techchallange3/docker/flag-service
+  SERVICE_PATH: techchallange4/docker/flag-service
   PYTHON_VERSION: '3.11'
   AWS_REGION: us-east-1
   ECR_REPOSITORY: flag-service
@@ -179,28 +179,26 @@ jobs:
           ignore-unfixed: true
 
       # ---------- Autenticação AWS ----------
-      # Conta normal: OIDC. O GitHub troca um token efêmero por credencial
-      # temporária da AWS - não existe chave de longa duração no repositório.
-      # A role vem do IaC (techchallange3/iac/modules/github-oidc) e a trust
-      # policy dela só aceita este repo em refs/heads/main.
-      - name: Configurar credenciais AWS (OIDC)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      # A conta muda conforme a variável de repositório AWS_MODE:
+      #   normal  -> OIDC (role do IaC, sem chave nenhuma no GitHub)
+      #   academy -> chaves temporárias do Learner Lab (o Academy proíbe
+      #              criar IAM role). Renove a cada sessão com
+      #              techchallange4/update-secrets-aws.sh
+      - name: Configurar credenciais AWS (OIDC - conta normal)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.AWS_MODE != 'academy'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Alternativa para AWS Academy, onde não se pode criar IAM role: as 3
-      # chaves temporárias do Learner Lab, renovadas com
-      # techchallange3/update-secrets-aws.sh a cada expiração da sessão.
-      #- name: Configurar credenciais AWS (Academy - Access Keys temporárias)
-      #  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      #  uses: aws-actions/configure-aws-credentials@v4
-      #  with:
-      #    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #    aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-      #    aws-region: ${{ env.AWS_REGION }}
+      - name: Configurar credenciais AWS (AWS Academy - sessão temporária)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.AWS_MODE == 'academy'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login no Amazon ECR
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -236,7 +234,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           IMAGE_URI: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.IMAGE_TAG }}
-          MANIFESTO: techchallange3/kubernetes/flag-service/deployment.yaml
+          MANIFESTO: techchallange4/kubernetes/flag-service/deployment.yaml
         run: |
           set -euo pipefail
 

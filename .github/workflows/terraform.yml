@@ -31,12 +31,12 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'techchallange3/iac/**'
+      - 'techchallange4/iac/**'
       - '.github/workflows/terraform.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'techchallange3/iac/**'
+      - 'techchallange4/iac/**'
       - '.github/workflows/terraform.yml'
 
 concurrency:
@@ -45,7 +45,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TF_DIR: techchallange3/iac
+  TF_DIR: techchallange4/iac
   TF_VERSION: '1.11.6'   # OpenTofu - precisa casar com quem gerou o .terraform.lock.hcl
   AWS_REGION: us-east-1
 
